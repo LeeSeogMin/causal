@@ -1,0 +1,12 @@
+# Base packages used across most `practice/` chapters.
+numpy
+pandas
+scipy
+matplotlib
+seaborn
+scikit-learn
+statsmodels
+networkx
+econml
+xgboost
+

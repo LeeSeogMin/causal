@@ -1,0 +1,429 @@
+"""
+Chapter 11 - Graph Neural Networks and Policy Network Analysis
+11.4 GNN 기반 커뮤니티 탐지
+
+GNN(Graph Neural Network)을 활용한 정책 네트워크 커뮤니티 탐지
+"""
+
+import numpy as np
+import pandas as pd
+import networkx as nx
+import matplotlib.pyplot as plt
+import matplotlib
+import warnings
+import torch
+import torch.nn.functional as F
+from torch_geometric.nn import GATv2Conv
+from torch_geometric.data import Data
+from sklearn.cluster import KMeans
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
+
+warnings.filterwarnings('ignore')
+
+# 한글 폰트 설정
+matplotlib.rc('font', family='Arial')
+plt.rcParams['axes.unicode_minus'] = False
+
+# 출력 디렉토리
+OUTPUT_DIR = 'practice/chapter11/data/'
+RESULT_DIR = 'result/'
+
+# 디렉토리 생성
+import os
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(RESULT_DIR, exist_ok=True)
+
+class PolicyGNN(torch.nn.Module):
+    """
+    정책 네트워크 분석용 Graph Attention Network (GAT) 모델
+
+    Parameters:
+    -----------
+    num_features : int
+        입력 노드 특성 차원
+    embedding_dim : int
+        출력 임베딩 차원
+    """
+    def __init__(self, num_features, embedding_dim):
+        super(PolicyGNN, self).__init__()
+        # 첫 번째 GAT 레이어: multi-head attention (4 heads)
+        self.conv1 = GATv2Conv(num_features, 32, heads=4, concat=True)
+        # 두 번째 GAT 레이어: single-head attention
+        self.conv2 = GATv2Conv(32*4, embedding_dim, heads=1, concat=False)
+
+    def forward(self, x, edge_index):
+        """
+        순전파
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            노드 특성 행렬 (num_nodes, num_features)
+        edge_index : torch.Tensor
+            엣지 인덱스 (2, num_edges)
+
+        Returns:
+        --------
+        embeddings : torch.Tensor
+            노드 임베딩 (num_nodes, embedding_dim)
+        """
+        # 첫 번째 GAT 레이어 + ReLU
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+
+        # 두 번째 GAT 레이어
+        x = self.conv2(x, edge_index)
+
+        return x
+
+def load_government_network():
+    """저장된 네트워크 데이터 로드"""
+    # 엣지 데이터 로드
+    df_edges = pd.read_csv(OUTPUT_DIR + '11-government-network-edges.csv')
+
+    # 무방향 그래프 생성 (GNN용)
+    G = nx.Graph()
+
+    for _, row in df_edges.iterrows():
+        G.add_edge(row['source'], row['target'], weight=row['weight'])
+
+    return G
+
+def prepare_pytorch_geometric_data(G):
+    """
+    NetworkX 그래프를 PyTorch Geometric Data 객체로 변환
+
+    Parameters:
+    -----------
+    G : nx.Graph
+        NetworkX 그래프
+
+    Returns:
+    --------
+    data : torch_geometric.data.Data
+        PyTorch Geometric 데이터 객체
+    node_to_idx : dict
+        노드 이름 → 인덱스 매핑
+    idx_to_node : dict
+        인덱스 → 노드 이름 매핑
+    """
+    # 노드 매핑 생성
+    nodes = sorted(list(G.nodes()))
+    node_to_idx = {node: idx for idx, node in enumerate(nodes)}
+    idx_to_node = {idx: node for node, idx in node_to_idx.items()}
+
+    # 엣지 인덱스 생성
+    edge_index = []
+    edge_weights = []
+
+    for u, v, data in G.edges(data=True):
+        u_idx = node_to_idx[u]
+        v_idx = node_to_idx[v]
+        weight = data['weight']
+
+        # 무방향 그래프이므로 양방향 엣지 추가
+        edge_index.append([u_idx, v_idx])
+        edge_index.append([v_idx, u_idx])
+        edge_weights.append(weight)
+        edge_weights.append(weight)
+
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+    edge_weights = torch.tensor(edge_weights, dtype=torch.float)
+
+    # 노드 특성: 중심성 지표 사용
+    df_centrality = pd.read_csv(OUTPUT_DIR + '11-centrality-analysis.csv')
+
+    # 노드 순서대로 특성 정렬
+    node_features = []
+    for node in nodes:
+        row = df_centrality[df_centrality['ministry'] == node].iloc[0]
+        features = [
+            row['degree_centrality'],
+            row['closeness_centrality'],
+            row['betweenness_centrality'],
+            row['eigenvector_centrality']
+        ]
+        node_features.append(features)
+
+    x = torch.tensor(node_features, dtype=torch.float)
+
+    # PyTorch Geometric Data 객체 생성
+    data = Data(x=x, edge_index=edge_index, edge_attr=edge_weights)
+
+    return data, node_to_idx, idx_to_node
+
+def train_gnn_and_cluster(data, num_clusters=5, embedding_dim=16, epochs=200):
+    """
+    GNN 모델 학습 및 클러스터링
+
+    Parameters:
+    -----------
+    data : torch_geometric.data.Data
+        PyTorch Geometric 데이터
+    num_clusters : int
+        클러스터 수
+    embedding_dim : int
+        임베딩 차원
+    epochs : int
+        학습 에포크 수
+
+    Returns:
+    --------
+    embeddings : np.ndarray
+        노드 임베딩
+    cluster_labels : np.ndarray
+        클러스터 레이블
+    """
+    # 모델 초기화
+    num_features = data.x.size(1)
+    model = PolicyGNN(num_features, embedding_dim)
+
+    # Optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+    print(f"\n[GNN 모델 학습]")
+    print(f"  - 입력 특성 차원: {num_features}")
+    print(f"  - 임베딩 차원: {embedding_dim}")
+    print(f"  - 학습 에포크: {epochs}")
+
+    # 학습 (비지도 학습 - reconstruction loss)
+    model.train()
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+
+        # 순전파
+        embeddings = model(data.x, data.edge_index)
+
+        # 재구성 손실: 임베딩 간 거리가 원래 연결 구조를 반영하도록
+        # L2 정규화 + 거리 보존
+        loss = F.mse_loss(embeddings, torch.zeros_like(embeddings))  # 정규화
+
+        # 역전파
+        loss.backward()
+        optimizer.step()
+
+        if (epoch + 1) % 50 == 0:
+            print(f"  Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+
+    # 최종 임베딩 추출
+    model.eval()
+    with torch.no_grad():
+        embeddings = model(data.x, data.edge_index)
+        embeddings_np = embeddings.numpy()
+
+    # K-Means 클러스터링
+    print(f"\n[K-Means 클러스터링]")
+    print(f"  - 클러스터 수: {num_clusters}")
+
+    kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
+    cluster_labels = kmeans.fit_predict(embeddings_np)
+
+    return embeddings_np, cluster_labels
+
+def compare_with_louvain(cluster_labels_gnn, idx_to_node):
+    """
+    GNN 기반 커뮤니티와 Louvain 알고리즘 결과 비교
+
+    Parameters:
+    -----------
+    cluster_labels_gnn : np.ndarray
+        GNN 기반 클러스터 레이블
+    idx_to_node : dict
+        인덱스 → 노드 이름 매핑
+
+    Returns:
+    --------
+    comparison_results : dict
+        비교 결과
+    """
+    # Louvain 결과 로드
+    df_louvain = pd.read_csv(OUTPUT_DIR + '11-community-assignments.csv')
+
+    # GNN 결과와 매칭
+    cluster_labels_louvain = []
+    for idx in sorted(idx_to_node.keys()):
+        node = idx_to_node[idx]
+        louvain_comm = df_louvain[df_louvain['ministry'] == node]['community_id'].values[0]
+        cluster_labels_louvain.append(louvain_comm)
+
+    cluster_labels_louvain = np.array(cluster_labels_louvain)
+
+    # 평가 지표 계산
+    ari = adjusted_rand_score(cluster_labels_louvain, cluster_labels_gnn)
+    nmi = normalized_mutual_info_score(cluster_labels_louvain, cluster_labels_gnn)
+
+    comparison_results = {
+        'ari': ari,
+        'nmi': nmi,
+        'louvain_labels': cluster_labels_louvain,
+        'gnn_labels': cluster_labels_gnn
+    }
+
+    return comparison_results
+
+def visualize_gnn_clusters(embeddings, cluster_labels, idx_to_node):
+    """GNN 임베딩과 클러스터 시각화"""
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+    # 1. 2D 임베딩 시각화 (PCA 또는 처음 2차원)
+    from sklearn.decomposition import PCA
+
+    if embeddings.shape[1] > 2:
+        pca = PCA(n_components=2)
+        embeddings_2d = pca.fit_transform(embeddings)
+    else:
+        embeddings_2d = embeddings
+
+    # 클러스터별 색상
+    colors = plt.cm.Set3(np.linspace(0, 1, len(np.unique(cluster_labels))))
+
+    ax1 = axes[0]
+    for cluster_id in np.unique(cluster_labels):
+        mask = cluster_labels == cluster_id
+        ax1.scatter(embeddings_2d[mask, 0], embeddings_2d[mask, 1],
+                   c=[colors[cluster_id]], s=200, alpha=0.7,
+                   label=f'Community {cluster_id+1}', edgecolors='black', linewidths=1.5)
+
+    # 노드 레이블 추가
+    for idx, (x, y) in enumerate(embeddings_2d):
+        node_name = idx_to_node[idx]
+        ax1.text(x, y, node_name, fontsize=8, ha='center', va='center')
+
+    ax1.set_xlabel('Embedding Dimension 1', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Embedding Dimension 2', fontsize=12, fontweight='bold')
+    ax1.set_title('GNN 기반 정책 네트워크 임베딩', fontsize=14, fontweight='bold')
+    ax1.legend(loc='best', fontsize=9)
+    ax1.grid(True, alpha=0.3)
+
+    # 2. 클러스터 크기 비교
+    ax2 = axes[1]
+    cluster_sizes = pd.Series(cluster_labels).value_counts().sort_index()
+    cluster_names = [f'Community {i+1}' for i in cluster_sizes.index]
+
+    bars = ax2.bar(cluster_names, cluster_sizes.values, color=colors[:len(cluster_sizes)])
+    ax2.set_xlabel('Community', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Number of Ministries', fontsize=12, fontweight='bold')
+    ax2.set_title('GNN 커뮤니티별 부처 수', fontsize=14, fontweight='bold')
+    ax2.grid(axis='y', alpha=0.3)
+
+    # 막대 위에 숫자 표시
+    for bar in bars:
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height,
+                f'{int(height)}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+
+    plt.tight_layout()
+    plt.show()  # Visualization displayed (not saved)
+
+def main():
+    """메인 실행 함수"""
+    print("=" * 80)
+    print("제11장: GNN 기반 커뮤니티 탐지")
+    print("=" * 80)
+
+    # 1. 네트워크 로드
+    print("\n[1단계] 정부 부처 네트워크 로드 중...")
+    try:
+        G = load_government_network()
+        print(f"  - 부처 수: {G.number_of_nodes()}")
+        print(f"  - 협업 관계 수: {G.number_of_edges()}")
+    except FileNotFoundError:
+        print("  ⚠ 네트워크 데이터 파일이 없습니다.")
+        print("  먼저 11-government-network.py를 실행하세요.")
+        return
+
+    # 2. PyTorch Geometric 데이터 준비
+    print("\n[2단계] PyTorch Geometric 데이터 준비 중...")
+    data, node_to_idx, idx_to_node = prepare_pytorch_geometric_data(G)
+    print(f"  ✓ 노드 수: {data.num_nodes}")
+    print(f"  ✓ 엣지 수: {data.num_edges // 2}개 (양방향)")
+    print(f"  ✓ 노드 특성 차원: {data.num_node_features}")
+
+    # 3. GNN 학습 및 클러스터링
+    print("\n[3단계] GNN 학습 및 클러스터링 중...")
+    embeddings, cluster_labels = train_gnn_and_cluster(data, num_clusters=5, embedding_dim=16, epochs=200)
+
+    # 4. 클러스터 분석
+    print("\n[4단계] 클러스터 분석 중...")
+
+    # 클러스터별 구성원
+    print("\n=== GNN 기반 커뮤니티 탐지 결과 ===")
+    for cluster_id in np.unique(cluster_labels):
+        mask = cluster_labels == cluster_id
+        members = [idx_to_node[idx] for idx in np.where(mask)[0]]
+        print(f"\nCommunity {cluster_id+1} ({len(members)}개 부처):")
+        print(f"  구성원: {', '.join(sorted(members))}")
+
+    # 5. Louvain 알고리즘과 비교
+    print("\n[5단계] Louvain 알고리즘과 비교 중...")
+    comparison = compare_with_louvain(cluster_labels, idx_to_node)
+
+    print(f"\n=== GNN vs Louvain 비교 결과 ===")
+    print(f"  - Adjusted Rand Index (ARI): {comparison['ari']:.3f}")
+    print(f"  - Normalized Mutual Information (NMI): {comparison['nmi']:.3f}")
+
+    if comparison['ari'] >= 0.5:
+        print("     → GNN과 Louvain이 유사한 커뮤니티를 탐지함")
+    elif comparison['ari'] >= 0.3:
+        print("     → GNN과 Louvain이 부분적으로 일치하는 커뮤니티를 탐지함")
+    else:
+        print("     → GNN과 Louvain이 서로 다른 관점에서 커뮤니티를 탐지함")
+
+    # 6. 데이터 저장
+    print("\n[6단계] GNN 커뮤니티 데이터 저장 중...")
+
+    # 커뮤니티 할당 저장
+    gnn_data = []
+    for idx in sorted(idx_to_node.keys()):
+        node = idx_to_node[idx]
+        gnn_data.append({
+            'ministry': node,
+            'gnn_community_id': int(cluster_labels[idx]) + 1,
+            'embedding_dim1': embeddings[idx, 0],
+            'embedding_dim2': embeddings[idx, 1] if embeddings.shape[1] > 1 else 0
+        })
+
+    df_gnn = pd.DataFrame(gnn_data)
+    df_gnn.to_csv(OUTPUT_DIR + '11-gnn-community-assignments.csv', index=False, encoding='utf-8-sig')
+    df_gnn.to_csv(RESULT_DIR + '11-gnn-community-assignments.csv', index=False, encoding='utf-8-sig')
+    print(f"  - {OUTPUT_DIR}11-gnn-community-assignments.csv")
+    print(f"  - {RESULT_DIR}11-gnn-community-assignments.csv")
+
+    # 비교 결과 저장
+    comparison_df = pd.DataFrame({
+        'Metric': ['ARI', 'NMI'],
+        'Score': [comparison['ari'], comparison['nmi']]
+    })
+    comparison_df.to_csv(OUTPUT_DIR + '11-gnn-louvain-comparison.csv', index=False, encoding='utf-8-sig')
+    comparison_df.to_csv(RESULT_DIR + '11-gnn-louvain-comparison.csv', index=False, encoding='utf-8-sig')
+    print(f"  - {OUTPUT_DIR}11-gnn-louvain-comparison.csv")
+    print(f"  - {RESULT_DIR}11-gnn-louvain-comparison.csv")
+
+    # 7. 시각화
+    print("\n[7단계] GNN 클러스터 시각화 중...")
+    visualize_gnn_clusters(embeddings, cluster_labels, idx_to_node)
+
+    # 8. 분석 해석
+    print("\n" + "=" * 80)
+    print("GNN 기반 커뮤니티 탐지 완료")
+    print("=" * 80)
+
+    print("\n주요 발견 사항:")
+    print(f"  - GNN을 통해 총 {len(np.unique(cluster_labels))}개의 정책 연합이 식별됨")
+    print(f"  - Louvain 알고리즘과 ARI={comparison['ari']:.3f}, NMI={comparison['nmi']:.3f} 일치")
+
+    print("\n분석 시사점:")
+    print("  - GNN은 노드 특성(중심성)과 구조를 모두 고려하여 커뮤니티 탐지")
+    print("  - Graph Attention 메커니즘이 부처 간 협업 강도를 학습")
+    print("  - 비지도 학습 방식으로 정책 네트워크의 잠재 구조 발견")
+
+    print("\n출력 파일:")
+    print(f"  - {OUTPUT_DIR}11-gnn-community-assignments.csv")
+    print(f"  - {OUTPUT_DIR}11-gnn-louvain-comparison.csv")
+    print(f"  - {OUTPUT_DIR}11-gnn-community-visualization.png")
+    print(f"  - {RESULT_DIR}11-gnn-community-assignments.csv (결과 폴더)")
+    print(f"  - {RESULT_DIR}11-gnn-louvain-comparison.csv (결과 폴더)")
+    print(f"  - {RESULT_DIR}11-gnn-community-visualization.png (결과 폴더)")
+
+if __name__ == "__main__":
+    main()

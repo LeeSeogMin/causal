@@ -1,0 +1,82 @@
+{
+  "데이터셋_정보": {
+    "이름": "전처리된 민원 텍스트 데이터셋",
+    "설명": "BERT/KoBERT 분석을 위한 전처리된 민원 데이터",
+    "전처리_일시": "2025-08-24 16:27:38",
+    "총_레코드수": 1000,
+    "전처리_방법": {
+      "한국어": "KoNLPy Okt 형태소 분석, 불용어 제거",
+      "영어": "NLTK 토큰화, 불용어 제거, Porter Stemming"
+    }
+  },
+  "변수_설명": {
+    "complaint_id": "민원 고유 ID",
+    "original_text": "원본 민원 텍스트",
+    "processed_text": "전처리된 민원 텍스트",
+    "token_count": "토큰 개수",
+    "category": "민원 카테고리",
+    "sentiment": "감성 레이블 (positive/neutral/negative)",
+    "status": "처리 상태",
+    "date": "민원 접수일",
+    "location": "민원 발생 지역",
+    "language": "언어 코드 (ko/en)",
+    "source": "데이터 출처"
+  },
+  "전처리_통계": {
+    "전처리_통계": {
+      "total_processed": 1000,
+      "korean_processed": 700,
+      "english_processed": 300,
+      "avg_length_before": 52.367,
+      "avg_length_after": 43.484,
+      "processing_time": "0:00:00.201624"
+    },
+    "텍스트_길이_분포": {
+      "원본_평균": 52.37,
+      "원본_중앙값": 44.0,
+      "처리후_평균": 43.48,
+      "처리후_중앙값": 42.0,
+      "압축률": 16.96
+    },
+    "토큰_통계": {
+      "평균_토큰수": 9.21,
+      "최대_토큰수": "13",
+      "최소_토큰수": "6",
+      "중앙값_토큰수": 9.0
+    },
+    "언어별_분포": {
+      "ko": 700,
+      "en": 300
+    },
+    "카테고리별_평균_토큰수": {
+      "Digital Services": 8.48,
+      "Education": 8.0,
+      "Environment": 7.86,
+      "Healthcare": 7.81,
+      "Public Transport": 8.24,
+      "교통": 10.76,
+      "복지": 11.12,
+      "안전": 8.33,
+      "행정": 8.24,
+      "환경": 9.71
+    }
+  },
+  "데이터_품질": {
+    "결측값": {
+      "complaint_id": 0,
+      "text": 0,
+      "category": 0,
+      "sentiment": 0,
+      "status": 0,
+      "date": 0,
+      "location": 0,
+      "language": 0,
+      "source": 0,
+      "original_text": 0,
+      "processed_text": 0,
+      "token_count": 0
+    },
+    "중복_레코드": 0,
+    "빈_텍스트": "0"
+  }
+}

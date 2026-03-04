@@ -1,0 +1,90 @@
+{
+  "dataset_info": {
+    "name": "정책 민원 텍스트 분석 데이터셋",
+    "description": "국민신문고 및 에스토니아 e-Gov 포털 스타일의 민원 데이터",
+    "created_date": "2025-08-24",
+    "total_records": 1000,
+    "languages": [
+      "Korean (ko)",
+      "English (en)"
+    ],
+    "sources": [
+      "국민신문고",
+      "Estonian e-Gov Portal"
+    ]
+  },
+  "variables": {
+    "complaint_id": {
+      "type": "string",
+      "description": "민원 고유 ID",
+      "format": "KR_##### 또는 EE_#####"
+    },
+    "text": {
+      "type": "string",
+      "description": "민원 내용 텍스트",
+      "language": "한국어 또는 영어"
+    },
+    "category": {
+      "type": "categorical",
+      "description": "민원 카테고리",
+      "values": [
+        "안전",
+        "Digital Services",
+        "행정",
+        "환경",
+        "Healthcare",
+        "복지",
+        "Public Transport",
+        "교통",
+        "Environment",
+        "Education"
+      ]
+    },
+    "sentiment": {
+      "type": "categorical",
+      "description": "감성 레이블",
+      "values": [
+        "positive",
+        "neutral",
+        "negative"
+      ]
+    },
+    "status": {
+      "type": "categorical",
+      "description": "처리 상태",
+      "values": [
+        "접수",
+        "submitted",
+        "처리중",
+        "완료",
+        "in_progress",
+        "resolved"
+      ]
+    },
+    "date": {
+      "type": "date",
+      "description": "민원 접수일",
+      "format": "YYYY-MM-DD"
+    },
+    "location": {
+      "type": "string",
+      "description": "민원 발생 지역"
+    },
+    "language": {
+      "type": "categorical",
+      "description": "언어 코드",
+      "values": [
+        "ko",
+        "en"
+      ]
+    },
+    "source": {
+      "type": "categorical",
+      "description": "데이터 출처",
+      "values": [
+        "국민신문고",
+        "Estonian e-Gov Portal"
+      ]
+    }
+  }
+}

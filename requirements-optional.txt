@@ -1,0 +1,7 @@
+# Optional / advanced chapters. Install only if needed.
+torch
+tensorflow
+lightgbm
+quantile-forest
+linearmodels
+

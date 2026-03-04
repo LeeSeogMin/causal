@@ -1,0 +1,4 @@
+true_att=5.937502
+n_samples=2000
+n_treated=583
+n_control=1417
