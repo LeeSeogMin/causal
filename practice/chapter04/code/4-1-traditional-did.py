@@ -1,10 +1,28 @@
 """
 제4장: 전통적 Difference-in-Differences
 이원 고정효과 모형을 활용한 DID 추정과 사전 추세 검정
+
+수정 이력
+---------
+2026-08-17
+- 증상: 스크립트가 끝까지 실행되지 않고 멈춤. 표준출력에 아무것도 남지 않음.
+- 원인: matplotlib 기본 백엔드가 tkagg여서 plt.show()가 창을 띄우고 사용자
+  입력을 기다린다. 콘솔에서 일괄 실행하면 여기서 무한 대기한다.
+- 조치: pyplot을 import 하기 전에 matplotlib.use('Agg')로 화면 없는 백엔드를
+  지정하고, plt.show() 대신 plt.close()로 그림 객체를 닫는다.
+  PNG 저장(plt.savefig)은 그대로 동작한다.
+
+2026-08-17 (2)
+- 증상: 시간 수준 클러스터 표준오차가 0.21에서 0.15로 줄었는데 출력은
+  "+-31% 증가"로 나왔다.
+- 원인: 출력 서식이 부호와 무관하게 '+'와 '증가'를 고정 문자열로 붙였다.
+- 조치: 증감 방향을 계산해 '증가'/'감소'를 골라 쓰는 change_label()을 넣었다.
 """
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # 화면 없는 백엔드 (plt.show() 대기 방지)
 import matplotlib.pyplot as plt
 import seaborn as sns
 import statsmodels.formula.api as smf
@@ -287,7 +305,7 @@ def visualize_did_results(df, results, treatment_period=20):
 
     plt.tight_layout()
     plt.savefig('4-1-traditional-did-results.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -343,9 +361,18 @@ def main():
     print("=" * 70)
 
     cluster_res = cluster_robust_se(df, model)
-    print(f"\n개체 수준 클러스터링:    SE = {cluster_res['se_entity']:.2f}")
-    print(f"시간 수준 클러스터링:    SE = {cluster_res['se_time']:.2f} (+{(cluster_res['se_time']/cluster_res['se_entity']-1)*100:.0f}% 증가)")
-    print(f"이원 클러스터링:         SE = {cluster_res['se_twoway']:.2f} (+{(cluster_res['se_twoway']/cluster_res['se_entity']-1)*100:.0f}% 증가)")
+
+    def change_label(base, value):
+        pct = (value / base - 1) * 100
+        word = '증가' if pct >= 0 else '감소'
+        return f"({abs(pct):.0f}% {word})"
+
+    base_se = cluster_res['se_entity']
+    print(f"\n개체 수준 클러스터링:    SE = {base_se:.2f} (기준)")
+    print(f"시간 수준 클러스터링:    SE = {cluster_res['se_time']:.2f} "
+          f"{change_label(base_se, cluster_res['se_time'])}")
+    print(f"이원 클러스터링:         SE = {cluster_res['se_twoway']:.2f} "
+          f"{change_label(base_se, cluster_res['se_twoway'])}")
 
     # 5. 결과 해석
     print("\n" + "=" * 70)

@@ -1,10 +1,39 @@
 """
 제4장: Synthetic Control Method
 합성 대조군 방법론을 활용한 정책 효과 추정
+
+수정 이력
+---------
+2026-08-17
+- 증상: 스크립트가 끝까지 실행되지 않고 멈춤. 표준출력에 아무것도 남지 않음.
+- 원인: matplotlib 기본 백엔드가 tkagg여서 plt.show()가 창을 띄우고 사용자
+  입력을 기다린다. 콘솔에서 일괄 실행하면 여기서 무한 대기한다.
+- 조치: pyplot을 import 하기 전에 matplotlib.use('Agg')로 화면 없는 백엔드를
+  지정하고, plt.show() 대신 plt.close()로 그림 객체를 닫는다.
+  PNG 저장(plt.savefig)은 그대로 동작한다.
+
+2026-08-17 (2)
+- 증상 1: "상위 5개 도시(광주, 부산, 대구, 대전, 울산)"로 출력되는데 실제 가중치
+  상위 5개는 광주·울산·창원·전주·성남이었다.
+- 원인 1: 도시 이름 목록을 데이터 생성 시점의 true_weights 순서대로 하드코딩했다.
+  최적화가 찾은 가중치 순서와 무관한 값이다.
+- 조치 1: sorted_idx로 실제 상위 5개 인덱스를 뽑아 cities에서 이름을 가져온다.
+
+- 증상 2: 사전 RMSPE가 표준편차의 24.5%인데 "20% 이내이면 양호"라고 출력하면서
+  동시에 양호로 판정했다. 기준과 판정이 어긋난다.
+- 원인 2: 검증되지 않은 20% 기준선을 문장에만 적어 두었다.
+- 조치 2: 기준선 대신 |사후 평균 효과| / 사전 RMSPE 배수를 계산해 출력한다.
+  두 값 모두 이 데이터에서 직접 잰 값이다.
+
+- 증상 3: donor 가중치 막대그래프의 한글 도시명이 네모로 깨졌다.
+- 원인 3: 폰트가 'Arial'이라 한글 글리프가 없다.
+- 조치 3: 'Malgun Gothic'으로 바꿨다.
 """
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # 화면 없는 백엔드 (plt.show() 대기 방지)
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.optimize import minimize
@@ -12,7 +41,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 한글 폰트 설정
-plt.rcParams['font.family'] = 'Arial'
+plt.rcParams['font.family'] = 'Malgun Gothic'  # donor 이름이 한글이라 한글 폰트 필요
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_style("whitegrid")
 
@@ -260,7 +289,7 @@ def visualize_scm_results(Y_treated, Y_synth, weights, cities, n_pre):
 
     plt.tight_layout()
     plt.savefig('4-3-scm-results.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -330,17 +359,19 @@ def main():
     print("\n1. 합성 대조군의 품질:")
     print(f"   - 사전 MSPE {scm_results['mspe']:.2f}는")
     print(f"     결과 변수 표준편차({Y_std:.2f}) 대비 {scm_results['rmspe']/Y_std*100:.1f}%")
-    print(f"   - 합성 대조군이 처치 지역의 사전 추세를 양호하게 재현")
-    print(f"   - 일반적으로 RMSPE가 표준편차의 20% 이내이면 적합도 양호")
+    ratio = abs(effect_results['avg_effect']) / scm_results['rmspe']
+    print(f"   - 사후 평균 효과({effect_results['avg_effect']:.2f})는")
+    print(f"     사전 RMSPE({scm_results['rmspe']:.2f})의 {ratio:.1f}배")
+    print(f"   - 사후 효과가 사전 오차보다 크게 나와야 효과로 읽을 수 있다")
 
     print("\n2. 가중치의 안정성:")
     print(f"   - HHI {scm_results['hhi']:.2f}는 가중치가 여러 donor에 분산됨을 표시")
     print(f"   - HHI > 0.7이면 소수 donor에 과도하게 의존")
     print(f"   - 본 분석은 주로 보간(interpolation)에 기반하므로 신뢰성 높음")
 
-    donor_names = ['광주', '부산', '대구', '대전', '울산']
+    donor_names = [cities[sorted_idx[i]] for i in range(5)]
     top_5_weights = [weights[sorted_idx[i]] for i in range(5)]
-    print(f"   - 상위 5개 도시({', '.join(donor_names[:5])})가")
+    print(f"   - 상위 5개 도시({', '.join(donor_names)})가")
     print(f"     총 가중치의 {sum(top_5_weights)*100:.0f}%를 차지")
 
     print("\n3. 처치효과의 크기와 유의성:")

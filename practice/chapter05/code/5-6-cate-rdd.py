@@ -347,8 +347,9 @@ ax8.set_ylabel('평균 CATE', fontsize=11)
 ax8.set_title('(h) 소득 분위별 평균 CATE', fontsize=12, fontweight='bold')
 ax8.grid(alpha=0.3, axis='y')
 
-plt.savefig('5-6-cate-rdd.png', dpi=300, bbox_inches='tight')
-print("그래프 저장 완료: practice/chapter05/5-6-cate-rdd.png")
+_out = os.path.join(base_path, '5-6-cate-rdd.png')
+plt.savefig(_out, dpi=300, bbox_inches='tight')
+print(f"그래프 저장 완료: {_out}")
 
 # 11. 최종 요약
 print("\n" + "=" * 80)

@@ -1,26 +1,51 @@
 """
-Chapter 9 - Deep Learning Basics and Policy Time Series Forecasting
-9.5.1 Data Preparation and Preprocessing
+Chapter 9 - Deep Learning Basics and Time Series Forecasting
+9.2 시계열을 학습 데이터로 바꾸기 (lookback 창 + 시간순 분할)
 
-한국 전력 수요 예측을 위한 데이터 준비 및 전처리
-시간적 특징의 순환 인코딩과 시퀀스 생성
+전력 수요 시뮬레이션 데이터를 만들고, lookback 창으로 잘라
+(입력 168시간 → 출력 24시간) 형태의 학습 데이터를 만든다.
+
+수정 이력
+---------
+2026-08-17
+1. 경로 오류 수정
+   증상: `OUTPUT_DIR = 'practice/chapter09/data/'`가 저장소 루트를 기준으로 적혀
+         있어 `practice/chapter09/code`에서 실행하면 FileNotFoundError가 났다.
+   원인: 상대경로를 실행 위치 기준으로 썼다.
+   수정: `__file__` 기준 절대경로로 바꿨다. 어느 위치에서 실행해도 같은 곳에 쓴다.
+
+2. 그림이 저장되지 않던 문제 수정
+   증상: `plt.show()`만 호출해 비대화형 실행에서 PNG가 남지 않았다.
+   수정: Agg 백엔드로 고정하고 `9-1-data-preparation.png`로 저장한다.
+
+3. 시퀀스 간 중복 제거 (stride 도입)
+   증상: 1시간씩 밀며 창을 잘라 17,161개 시퀀스가 나왔다. 이웃한 두 시퀀스는
+         168칸 중 167칸이 같아 정보는 거의 늘지 않고 학습 시간만 늘었다.
+   수정: `stride=6`으로 6시간씩 밀어 자른다. 시퀀스 수 17,161 → 2,861.
+
+4. 시간순 분할 지점을 여기서 함께 저장
+   시퀀스를 만든 뒤 훈련/검증/테스트 경계 인덱스를 같이 저장해,
+   뒤 스크립트가 무작위로 섞을 여지를 없앴다.
 """
 
+import os
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler, RobustScaler
-import matplotlib.pyplot as plt
+from sklearn.preprocessing import RobustScaler
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정
 matplotlib.rc('font', family='Arial')
 plt.rcParams['axes.unicode_minus'] = False
 
-# 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter09/data/'
+# 경로 (스크립트 위치 기준)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, os.pardir, 'data') + os.sep
+FIG_DIR = BASE_DIR + os.sep
 
 def generate_electricity_demand_data(n_days=365*2):
     """
@@ -190,19 +215,21 @@ def create_rolling_features(df, target_col='demand', windows=[24, 168]):
 
     return df
 
-def create_sequences(data, seq_length=168, pred_length=24):
+def create_sequences(data, seq_length=168, pred_length=24, stride=6):
     """
-    LSTM 학습을 위한 시퀀스 생성
-    1주일(168시간) 입력 → 24시간 예측
+    lookback 창으로 시계열을 자른다.
+    과거 seq_length 시간을 보고 다음 pred_length 시간을 맞추는 형태다.
 
     Parameters:
     -----------
     data : ndarray
-        입력 데이터
+        입력 데이터 (첫 번째 열이 demand)
     seq_length : int
-        입력 시퀀스 길이
+        입력 창 길이 (168시간 = 1주일)
     pred_length : int
-        예측 길이
+        예측 시계 (24시간)
+    stride : int
+        창을 몇 시간씩 밀며 자를지. 1이면 이웃 시퀀스가 167칸 겹친다.
 
     Returns:
     --------
@@ -213,7 +240,7 @@ def create_sequences(data, seq_length=168, pred_length=24):
     """
     X, y = [], []
 
-    for i in range(len(data) - seq_length - pred_length + 1):
+    for i in range(0, len(data) - seq_length - pred_length + 1, stride):
         # 입력: 과거 168시간
         X.append(data[i:i+seq_length])
         # 출력: 미래 24시간 (demand 컬럼만)
@@ -274,17 +301,29 @@ def visualize_data(df):
     ax5.legend(loc='upper right', fontsize=10)
     ax5.grid(True, alpha=0.3)
 
-    # (6) SMP (System Marginal Price)
+    # (6) 시간순 분할 (train / val / test)
     ax6 = axes[2, 1]
-    ax6.plot(df['datetime'][:24*30], df['smp'][:24*30], linewidth=1, color='orange')
-    ax6.set_xlabel('Date', fontsize=11)
-    ax6.set_ylabel('SMP (KRW/kWh)', fontsize=11)
-    ax6.set_title('(f) System Marginal Price', fontsize=12, fontweight='bold')
+    n = len(df)
+    i_tr = int(n * 0.7)
+    i_va = int(n * 0.85)
+    step = 24  # 일 단위로 솎아 그린다
+    ax6.plot(np.arange(0, i_tr, step), df['demand'].values[0:i_tr:step],
+             color='#2c6fbb', linewidth=1, label='Train (70%)')
+    ax6.plot(np.arange(i_tr, i_va, step), df['demand'].values[i_tr:i_va:step],
+             color='#d6a300', linewidth=1, label='Validation (15%)')
+    ax6.plot(np.arange(i_va, n, step), df['demand'].values[i_va:n:step],
+             color='#c0392b', linewidth=1, label='Test (15%)')
+    ax6.axvline(i_tr, color='black', linestyle='--', linewidth=1)
+    ax6.axvline(i_va, color='black', linestyle='--', linewidth=1)
+    ax6.set_xlabel('Hour index (chronological)', fontsize=11)
+    ax6.set_ylabel('Demand (MW)', fontsize=11)
+    ax6.set_title('(f) Chronological Split (no shuffling)', fontsize=12, fontweight='bold')
+    ax6.legend(loc='upper right', fontsize=9)
     ax6.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.show()
-    # Visualization displayed (not saved)
+    plt.savefig(FIG_DIR + '9-1-data-preparation.png', dpi=130, bbox_inches='tight')
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -323,7 +362,7 @@ def main():
     # 5. 데이터 저장
     print("\n[5단계] 데이터 저장 중...")
     df_clean.to_csv(OUTPUT_DIR + '9-1-preprocessed-data.csv', index=False, encoding='utf-8-sig')
-    print(f"  - 전처리 데이터 저장: {OUTPUT_DIR}9-1-preprocessed-data.csv")
+    print("  - 전처리 데이터 저장: data/9-1-preprocessed-data.csv")
 
     # 6. 시퀀스 생성 예시
     print("\n[6단계] 시퀀스 생성 예시...")
@@ -339,28 +378,42 @@ def main():
     ]
 
     # RobustScaler로 정규화
-    from sklearn.preprocessing import RobustScaler
+    # 주의: 시간순 분할의 훈련 구간(앞 70%)만으로 기준을 잡는다.
+    # 전체로 fit하면 테스트 구간의 중앙값·IQR이 훈련에 새어 든다.
+    n_rows = len(df_clean)
+    fit_end = int(n_rows * 0.7)
     scaler = RobustScaler()
-    data_scaled = scaler.fit_transform(df_clean[feature_cols])
+    scaler.fit(df_clean[feature_cols].iloc[:fit_end])
+    data_scaled = scaler.transform(df_clean[feature_cols])
+    print(f"  - 정규화 기준: 앞 {fit_end:,}행(훈련 구간)의 중앙값과 IQR")
+    print(f"  - demand 중앙값: {scaler.center_[0]:,.1f} MW, IQR: {scaler.scale_[0]:,.1f} MW")
 
     # 시퀀스 생성
-    X, y = create_sequences(data_scaled, seq_length=168, pred_length=24)
+    X, y = create_sequences(data_scaled, seq_length=168, pred_length=24, stride=6)
     print(f"  - 입력 시퀀스 형태: {X.shape}")
     print(f"  - 타겟 시퀀스 형태: {y.shape}")
     print(f"  - 해석: {X.shape[0]:,}개 샘플, 각 168시간 입력 → 24시간 예측")
 
+    # 시간순 분할 경계 (섞지 않는다)
+    n_seq = X.shape[0]
+    train_end = int(n_seq * 0.7)
+    val_end = int(n_seq * 0.85)
+    print(f"  - 시간순 분할: 훈련 {train_end:,} / 검증 {val_end - train_end:,} / 테스트 {n_seq - val_end:,}")
+
     # 시퀀스 데이터 저장 (numpy 형식)
     np.save(OUTPUT_DIR + '9-1-sequences-X.npy', X)
     np.save(OUTPUT_DIR + '9-1-sequences-y.npy', y)
-    print(f"  - 시퀀스 데이터 저장: {OUTPUT_DIR}9-1-sequences-X.npy, 9-1-sequences-y.npy")
+    print("  - 시퀀스 데이터 저장: data/9-1-sequences-X.npy, data/9-1-sequences-y.npy")
 
     # Scaler 파라미터 저장 (역정규화용)
     scaler_params = {
         'center': scaler.center_[0],  # demand의 중앙값
-        'scale': scaler.scale_[0]     # demand의 IQR
+        'scale': scaler.scale_[0],    # demand의 IQR
+        'train_end': train_end,       # 시간순 분할 경계
+        'val_end': val_end
     }
     np.save(OUTPUT_DIR + '9-1-scaler-params.npy', scaler_params)
-    print(f"  - Scaler 파라미터 저장: {OUTPUT_DIR}9-1-scaler-params.npy")
+    print("  - Scaler 파라미터 저장: data/9-1-scaler-params.npy")
 
     # 7. 시각화
     print("\n[7단계] 데이터 탐색 시각화 중...")
@@ -375,16 +428,17 @@ def main():
     print("  2. 지연 특징: 24시간, 48시간, 168시간 전 수요")
     print("  3. 이동 통계: 24시간, 168시간 이동평균 및 표준편차")
     print("  4. 외생 변수: 기온, 태양광/풍력 발전량, 정책 활성화 여부")
-    print("\n시사점:")
-    print("  - 순환 인코딩을 통해 23시와 0시의 연속성 학습 가능")
-    print("  - 지연 특징으로 일간 및 주간 패턴 포착")
-    print("  - 이동 통계로 최근 추세와 변동성 정보 제공")
-    print("  - RobustScaler로 이상치에 강건한 정규화 수행")
+    print("\n확인할 점:")
+    print("  - 순환 인코딩으로 23시와 0시가 이어진 값으로 들어간다")
+    print("  - 지연 특징이 하루 전·이틀 전·일주일 전 수요를 그대로 넣는다")
+    print("  - 정규화 기준은 훈련 구간에서만 계산한다")
+    print("  - 분할은 시간 순서대로 자른다. 무작위로 섞지 않는다")
 
     print("\n출력 파일:")
-    print(f"  - {OUTPUT_DIR}9-1-preprocessed-data.csv")
-    print(f"  - {OUTPUT_DIR}9-1-sequences-X.npy")
-    print(f"  - {OUTPUT_DIR}9-1-sequences-y.npy")
+    print("  - 9-1-preprocessed-data.csv")
+    print("  - 9-1-sequences-X.npy / 9-1-sequences-y.npy")
+    print("  - 9-1-scaler-params.npy")
+    print("  - 9-1-data-preparation.png")
 
 if __name__ == "__main__":
     main()

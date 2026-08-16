@@ -1,10 +1,41 @@
 """
 제4장: Synthetic Difference-in-Differences (SDID)
 DID와 SCM의 장점을 결합한 이중 강건 추정
+
+수정 이력
+---------
+2026-08-17
+- 증상: 스크립트가 끝까지 실행되지 않고 멈춤. 표준출력에 아무것도 남지 않음.
+- 원인: matplotlib 기본 백엔드가 tkagg여서 plt.show()가 창을 띄우고 사용자
+  입력을 기다린다. 콘솔에서 일괄 실행하면 여기서 무한 대기한다.
+- 조치: pyplot을 import 하기 전에 matplotlib.use('Agg')로 화면 없는 백엔드를
+  지정하고, plt.show() 대신 plt.close()로 그림 객체를 닫는다.
+  PNG 저장(plt.savefig)은 그대로 동작한다.
+
+2026-08-17 (2)
+- 증상 1: 시간 가중치 표에서 가장 오래된 시점 t-20이 "최근 1개월"로 나왔다.
+- 원인 1: 반복 인덱스 i가 0일 때를 최근으로 보고 f"최근 {i+1}개월"을 붙였다.
+  i=0은 사전 기간의 첫 시점, 즉 처치에서 가장 먼 시점이다.
+- 조치 1: 처치까지 남은 개월 수(months_before = n_pre - i)로 설명을 붙인다.
+
+- 증상 2: 시간 가중치가 20개 시점 모두 0.05(균등)인데 "최근 시점에 집중(25%)"으로
+  해석했다. 25%는 균등 분포에서 5/20으로 그대로 나오는 값이다.
+- 원인 2: 균등 분포일 때의 기준값과 대조하지 않고 절대값만 보고 판정했다.
+- 조치 2: 균등 분포 기준값(5/n_pre)과 대조해 쏠림 여부를 판정한다.
+
+- 증상 3: SDID 추정값이 SCM과 같은데 "DID와 SCM 사이에 위치"로 서술했다.
+- 원인 3: 위치 관계를 계산하지 않고 고정 문장을 출력했다.
+- 조치 3: 두 값과의 차이를 계산해 그대로 출력한다.
+
+- 증상 4: 단위 가중치 막대그래프의 한글 도시명이 네모로 깨졌다.
+- 원인 4: 폰트가 'Arial'이라 한글 글리프가 없다.
+- 조치 4: 'Malgun Gothic'으로 바꿨다.
 """
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # 화면 없는 백엔드 (plt.show() 대기 방지)
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.optimize import minimize
@@ -12,7 +43,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 한글 폰트 설정
-plt.rcParams['font.family'] = 'Arial'
+plt.rcParams['font.family'] = 'Malgun Gothic'  # donor 이름이 한글이라 한글 폰트 필요
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_style("whitegrid")
 
@@ -396,7 +427,7 @@ def visualize_sdid_results(Y_treated, Y_donors, sdid_results, comparison_results
 
     plt.tight_layout()
     plt.savefig('4-4-sdid-results.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -474,10 +505,11 @@ def main():
     cumulative = 0
     for i in range(n_pre):
         cumulative += lambda_weights[i]
-        period_label = f"t-{n_pre-i}"
-        if i < 3:
-            period_desc = f"최근 {i+1}개월"
-        elif i < 5:
+        months_before = n_pre - i          # i=0이 사전 기간의 첫 시점이다
+        period_label = f"t-{months_before}"
+        if months_before <= 3:
+            period_desc = f"처치 {months_before}개월 전"
+        elif months_before <= 5:
             period_desc = "최근 추세"
         else:
             period_desc = "과거 추세"
@@ -497,8 +529,9 @@ def main():
     did_effect = comparison_results['DID']['effect']
     scm_effect = comparison_results['SCM']['effect']
 
-    print(f"   - SDID 추정값 {sdid_effect:.2f}는")
-    print(f"     DID({did_effect:.2f})와 SCM({scm_effect:.2f}) 사이에 위치")
+    print(f"   - SDID 추정값 {sdid_effect:.2f}")
+    print(f"     DID({did_effect:.2f})와의 차이 {sdid_effect-did_effect:+.2f}, "
+          f"SCM({scm_effect:.2f})과의 차이 {sdid_effect-scm_effect:+.2f}")
     print(f"   - 평행추세 정보와 사전 적합 정보를 균형있게 통합")
 
     print("\n2. 효율성 향상:")
@@ -511,10 +544,16 @@ def main():
     print(f"     SCM({scm_se:.2f})보다 {(1-sdid_se/scm_se)*100:.0f}% 작음")
     print(f"   - 두 방법의 정보를 결합하여 분산 감소")
 
-    print("\n3. 시간 가변적 관계 포착:")
-    print(f"   - 시간 가중치가 최근 시점에 집중({recent_5_sum*100:.0f}%)")
-    print(f"   - 정책 효과가 시간에 따라 변하는 환경 반영")
-    print(f"   - 최근 추세가 미래 예측에 더 중요함을 시사")
+    print("\n3. 시간 가중치의 분포:")
+    uniform_5_sum = 5 / n_pre
+    print(f"   - 최근 5시점 합계 {recent_5_sum*100:.0f}%")
+    print(f"   - 균등 분포일 때의 값 {uniform_5_sum*100:.0f}%")
+    if recent_5_sum > uniform_5_sum * 1.2:
+        print("   - 판정: 최근 시점에 가중치가 쏠렸다")
+    elif recent_5_sum < uniform_5_sum * 0.8:
+        print("   - 판정: 과거 시점에 가중치가 쏠렸다")
+    else:
+        print("   - 판정: 균등 분포와 사실상 같다. 특정 시점을 강조하지 않았다")
 
     # 7. 세 방법론 종합 비교
     print("\n[세 방법론의 종합 비교]")

@@ -1,8 +1,21 @@
 """
 제2장: 전통적 Propensity Score Matching (PSM) 분석
 로지스틱 회귀 기반 PSM의 한계와 공변량 균형 개선 분석
+
+수정 이력
+---------
+2026-08-17
+1) 시각화 단계에서 KeyError('true_propensity')로 스크립트가 중단됐다.
+   원인: main()을 CSV 로드 방식으로 바꾸면서 data 딕셔너리에
+   'true_propensity'와 'true_ATE'를 담지 않았는데,
+   visualize_psm_results()는 두 키를 읽는다.
+   조치: CSV에 이미 들어 있는 두 열을 data 딕셔너리에 넣었다.
+2) 결과 해석 문구가 하드코딩되어 있어 실제 SMD와 어긋났다.
+   조치: 매칭 후 SMD가 0.1을 넘는 공변량 개수를 계산해서 출력한다.
+3) plt.show()가 배치 실행에서 불필요한 창을 띄우므로 plt.close()로 바꿨다.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -265,8 +278,11 @@ def visualize_psm_results(data, psm_results):
     plt.suptitle('Traditional Propensity Score Matching Analysis',
                  fontsize=14, fontweight='bold', y=0.995)
     plt.tight_layout()
-    plt.savefig('traditional_psm_analysis.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'traditional_psm_analysis.png')
+    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"   그래프 저장: {out_path}")
 
 def main():
     """메인 실행 함수"""
@@ -289,12 +305,17 @@ def main():
     Y1_true = df['Y1_true'].values
 
     true_ATT = np.mean((Y1_true - Y0_true)[treatment == 1])
+    true_ATE = np.mean(Y1_true - Y0_true)
 
     data = {
         'X': X,
         'treatment': treatment,
         'Y_observed': Y_observed,
-        'true_ATT': true_ATT
+        'true_ATT': true_ATT,
+        'true_ATE': true_ATE,
+        'true_propensity': df['true_propensity'].values,
+        'Y0_true': Y0_true,
+        'Y1_true': Y1_true
     }
 
     # Naive 추정
@@ -364,9 +385,12 @@ def main():
     print(f"   - 여전히 {abs(psm_results['att_psm'] - data['true_ATT']) / abs(data['true_ATT']) * 100:.1f}%의 잔여 편향 존재")
     print(f"   - 로지스틱 회귀의 모형 오설정이 주요 원인")
 
+    n_over_after = int((smd_after > 0.1).sum())
+    over_names = ', '.join(f'X{i+1}' for i in range(5) if smd_after[i] > 0.1)
     print("\n2. 불완전한 균형 달성:")
     print(f"   - 평균 SMD가 {avg_smd_before:.2f}에서 {avg_smd_after:.2f}로 개선됨")
-    print(f"   - 일부 공변량에서 SMD > 0.1 유지 (완전한 균형 미달성)")
+    print(f"   - 매칭 후 SMD > 0.1인 공변량: {n_over_after}개"
+          + (f" ({over_names})" if n_over_after else " (없음)"))
     print(f"   - 1차원 성향점수로 다차원 공변량 균형의 한계")
 
     print("\n3. 표본 손실과 외적 타당도:")

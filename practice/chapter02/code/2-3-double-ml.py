@@ -1,6 +1,21 @@
 """
 제2장: Double Machine Learning (DML) 구현
 Neyman 직교화와 교차 적합을 통한 인과효과 추정
+
+수정 이력
+---------
+2026-08-17
+1) 표준오차를 `np.std(theta)/sqrt(K)`로 계산했다. 이 값은 폴드 간 추정값이
+   얼마나 흩어졌는지만 재며, 표본에서 오는 불확실성을 담지 않는다.
+   그 결과 SE가 0.03으로 나오고 95% 신뢰구간 [2.83, 2.93]이 참값 2.99를
+   벗어나, 편향이 가장 작은 DML이 신뢰구간 판정에서 탈락했다.
+   조치: 직교화 모멘트의 영향함수 분산으로 SE를 계산한다.
+       psi_i = (Y_i - l(X_i)) - theta * (D_i - m(X_i))
+       Var(theta) = sum(psi_i^2 * Dres_i^2) / (sum(Dres_i^2))^2
+   폴드별 분산을 평균한 뒤 폴드 간 분산을 더한다.
+2) `naive_include`가 조건과 무관하게 항상 '✗'를 내도록 작성되어 있었다
+   (if/else 양쪽이 같은 값). 조치: 다른 방법과 같은 판정식으로 고쳤다.
+3) plt.show()를 plt.close()로 바꾸고 그래프 저장 경로를 절대경로로 바꿨다.
 """
 
 import numpy as np
@@ -46,6 +61,7 @@ def double_ml_ate(Y, D, X, n_splits=5, random_state=42):
     theta_estimates = []
     outcome_r2_list = []
     propensity_r2_list = []
+    theta_variances = []
 
     for train_idx, test_idx in kf.split(X):
         X_train, X_test = X[train_idx], X[test_idx]
@@ -80,6 +96,12 @@ def double_ml_ate(Y, D, X, n_splits=5, random_state=42):
         theta = np.sum(Y_residual * D_residual) / np.sum(D_residual ** 2)
         theta_estimates.append(theta)
 
+        # 영향함수 기반 분산 (폴드 내 표본 불확실성)
+        psi = Y_residual - theta * D_residual
+        theta_variances.append(
+            np.sum((psi ** 2) * (D_residual ** 2)) / (np.sum(D_residual ** 2) ** 2)
+        )
+
         # Nuisance parameter 성능 평가
         outcome_r2 = 1 - np.sum((Y_test - outcome_pred)**2) / np.sum((Y_test - Y_test.mean())**2)
         propensity_r2 = 1 - np.sum((D_test - propensity_pred)**2) / np.sum((D_test - D_test.mean())**2)
@@ -89,7 +111,11 @@ def double_ml_ate(Y, D, X, n_splits=5, random_state=42):
 
     # 교차 적합된 추정값의 평균
     ate_dml = np.mean(theta_estimates)
-    ate_se = np.std(theta_estimates) / np.sqrt(n_splits)
+
+    # 표준오차 = 폴드 내 표본 분산 평균 + 폴드 간 분산
+    var_within = np.mean(theta_variances) / n_splits
+    var_between = np.var(theta_estimates, ddof=1) / n_splits
+    ate_se = np.sqrt(var_within + var_between)
 
     # 95% 신뢰구간
     ci_lower = ate_dml - 1.96 * ate_se
@@ -101,6 +127,7 @@ def double_ml_ate(Y, D, X, n_splits=5, random_state=42):
         'ci_lower': ci_lower,
         'ci_upper': ci_upper,
         'theta_estimates': theta_estimates,
+        'theta_variances': theta_variances,
         'outcome_r2': outcome_r2_list,
         'propensity_r2': propensity_r2_list
     }
@@ -260,8 +287,12 @@ def visualize_dml_results(data, dml_results, naive_est, ols_est, psm_est):
     plt.suptitle('Double Machine Learning Analysis',
                  fontsize=14, fontweight='bold', y=0.995)
     plt.tight_layout()
-    plt.savefig('double_ml_analysis.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    import os
+    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'double_ml_analysis.png')
+    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"   그래프 저장: {out_path}")
 
 def main():
     """메인 실행 함수"""
@@ -372,7 +403,7 @@ def main():
     dml_include = '✓' if dml_results['ci_lower'] <= data['true_ATE'] <= dml_results['ci_upper'] else '✗'
     psm_include = '✓' if psm_est - 1.96*0.23 <= data['true_ATE'] <= psm_est + 1.96*0.23 else '✗'
     ols_include = '✓' if ols_est - 1.96*0.19 <= data['true_ATE'] <= ols_est + 1.96*0.19 else '✗'
-    naive_include = '✗' if naive_est - 1.96*0.21 <= data['true_ATE'] <= naive_est + 1.96*0.21 else '✗'
+    naive_include = '✓' if naive_est - 1.96*0.21 <= data['true_ATE'] <= naive_est + 1.96*0.21 else '✗'
 
     print(f"{'95% CI 포함':<15} | {dml_include:>8} | {psm_include:>8} | {ols_include:>8} | {naive_include:>8}")
 

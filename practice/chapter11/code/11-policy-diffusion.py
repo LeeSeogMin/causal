@@ -1,30 +1,46 @@
 """
-Chapter 11 - 정책 확산과 네트워크 영향 모델
-11.4.2 임계값 모델(Threshold Model) 기반 정책 확산 시뮬레이션
+Chapter 11 - 그래프 신경망과 조직 네트워크 분석
+11.4 임계값 모델로 보는 파급효과
+
+이웃 중 몇 %가 이미 채택했으면 나도 채택한다는 규칙(임계값 모델)으로
+정책 확산을 돌린다. 인과추론에서 말하는 간섭(interference)을
+눈으로 보게 만드는 실습이다.
+
+수정 이력
+---------
+2026-08-17
+1. 경로 오류: 프로젝트 루트 기준 상대경로여서 code 폴더에서 실행하면
+   FileNotFoundError로 죽었다. → __file__ 기준 절대경로로 교체.
+2. plt.show() 때문에 배치 실행이 멈췄다. → Agg 백엔드 + close().
+3. 그림 저장 위치를 diagrams/(개념도 폴더)에서 code 폴더로 옮겼다.
+   result/ 폴더 중복 저장도 삭제.
+4. (d) 티핑 포인트 그림에 '티핑 포인트 θ≈0.35' 세로선이 좌표 0.35에
+   고정 하드코딩되어 있었다. 실제로 채택률이 꺾이는 지점을
+   계산해 그 위치에 선을 긋도록 바꿨다.
+5. 마지막 요약의 "다중 시작이 더 빠르고 넓은 확산 달성" 문장이
+   실제 출력(단일 5단계, 다중 5단계로 같음)과 어긋났다.
+   → 두 값을 비교해 결과대로 쓰도록 고쳤다.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import networkx as nx
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정
+# 한글 폰트 설정 (Windows: Malgun Gothic)
 plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 10
 
-# 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter11/data/'
-RESULT_DIR = 'result/'
-DIAGRAM_DIR = 'diagrams/'
-
-import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, '..', 'data') + os.sep
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(RESULT_DIR, exist_ok=True)
-os.makedirs(DIAGRAM_DIR, exist_ok=True)
 
 
 class PolicyDiffusionModel:
@@ -304,11 +320,24 @@ def visualize_diffusion(results, G):
         history = model.run_simulation(threshold=th)
         final_rates_by_threshold.append(history[-1]['adoption_rate'] * 100)
 
+    # 채택률이 실제로 꺾이는 지점을 계산해서 그 자리에 선을 긋는다
+    drops = [final_rates_by_threshold[i] - final_rates_by_threshold[i + 1]
+             for i in range(len(thresholds) - 1)]
+    j = int(np.argmax(drops))
+    tipping = (thresholds[j] + thresholds[j + 1]) / 2
+
     ax4.plot(thresholds, final_rates_by_threshold, 'o-', color='#2196F3',
             linewidth=2.5, markersize=10)
     ax4.axhline(y=50, color='red', linestyle='--', alpha=0.7, label='50% 채택 기준선')
-    ax4.axvline(x=0.35, color='green', linestyle='--', alpha=0.7, label='티핑 포인트 (θ≈0.35)')
+    ax4.axvline(x=tipping, color='green', linestyle='--', alpha=0.7,
+                label=f'티핑 포인트 (θ≈{tipping:.3f})')
     ax4.fill_between(thresholds, final_rates_by_threshold, alpha=0.2, color='#2196F3')
+    print(f"  - 임계값별 최종 채택률: "
+          + ", ".join(f"θ={t:.2f}:{r:.1f}%"
+                      for t, r in zip(thresholds, final_rates_by_threshold)))
+    print(f"  - 채택률이 가장 크게 떨어지는 구간: "
+          f"θ={thresholds[j]:.2f} → {thresholds[j+1]:.2f} "
+          f"({final_rates_by_threshold[j]:.1f}% → {final_rates_by_threshold[j+1]:.1f}%)")
     ax4.set_xlabel('임계값 (θ)', fontsize=12)
     ax4.set_ylabel('최종 채택률 (%)', fontsize=12)
     ax4.set_title('(d) 임계값에 따른 최종 채택률 (티핑 포인트 분석)', fontsize=14, fontweight='bold')
@@ -317,13 +346,10 @@ def visualize_diffusion(results, G):
     ax4.set_ylim(0, 105)
 
     plt.tight_layout()
-    plt.savefig(DIAGRAM_DIR + '11-policy-diffusion.png', dpi=300, bbox_inches='tight',
+    plt.savefig(os.path.join(BASE_DIR, '11-policy-diffusion.png'),
+                dpi=150, bbox_inches='tight',
                 facecolor='white', edgecolor='none')
-    plt.savefig(OUTPUT_DIR + '11-policy-diffusion.png', dpi=300, bbox_inches='tight',
-                facecolor='white', edgecolor='none')
-    plt.savefig(RESULT_DIR + '11-policy-diffusion.png', dpi=300, bbox_inches='tight',
-                facecolor='white', edgecolor='none')
-    plt.show()
+    plt.close()
 
 
 def main():
@@ -381,12 +407,9 @@ def main():
 
     df_results.to_csv(OUTPUT_DIR + '11-diffusion-results.csv',
                       index=False, encoding='utf-8-sig')
-    df_results.to_csv(RESULT_DIR + '11-diffusion-results.csv',
-                      index=False, encoding='utf-8-sig')
 
-    print(f"  - {OUTPUT_DIR}11-diffusion-results.csv")
-    print(f"  - {RESULT_DIR}11-diffusion-results.csv")
-    print(f"  - {DIAGRAM_DIR}11-policy-diffusion.png")
+    print("  - ../data/11-diffusion-results.csv")
+    print("  - 11-policy-diffusion.png")
 
     # 7. 주요 발견
     print("\n" + "=" * 80)
@@ -394,19 +417,30 @@ def main():
     print("=" * 80)
 
     print("\n  1. 초기 채택자 위치의 중요성:")
-    print(f"     - 고중심성 부처(과기정통부) 시작: {results[0]['final_adoption_rate']*100:.1f}% 채택")
-    print(f"     - 저중심성 부처(통일부) 시작: {results[2]['final_adoption_rate']*100:.1f}% 채택")
-    print(f"     → 초기 채택자의 네트워크 위치가 확산 범위를 결정")
+    print(f"     - 고중심성 부처(과기정통부) 시작: "
+          f"{results[0]['final_adoption_rate']*100:.1f}% 채택, "
+          f"{results[0]['steps_to_saturation']}단계")
+    print(f"     - 저중심성 부처(통일부) 시작: "
+          f"{results[2]['final_adoption_rate']*100:.1f}% 채택, "
+          f"{results[2]['steps_to_saturation']}단계")
+    print(f"     → 최종 채택률은 같고 걸리는 단계 수만 "
+          f"{results[2]['steps_to_saturation'] - results[0]['steps_to_saturation']}단계 차이 난다")
 
     print("\n  2. 다중 초기 채택자 효과:")
-    print(f"     - 단일 시작: {results[0]['final_adoption_rate']*100:.1f}%, {results[0]['steps_to_saturation']}단계")
-    print(f"     - 다중 시작: {results[3]['final_adoption_rate']*100:.1f}%, {results[3]['steps_to_saturation']}단계")
-    print(f"     → 다중 시작이 더 빠르고 넓은 확산 달성")
+    s1, s4 = results[0]['steps_to_saturation'], results[3]['steps_to_saturation']
+    print(f"     - 단일 시작: {results[0]['final_adoption_rate']*100:.1f}%, {s1}단계")
+    print(f"     - 다중 시작: {results[3]['final_adoption_rate']*100:.1f}%, {s4}단계")
+    if s4 < s1:
+        print(f"     → 다중 시작이 {s1-s4}단계 빠르다")
+    elif s4 == s1:
+        print(f"     → 단계 수가 같다. 초기 채택자를 늘려도 빨라지지 않았다")
+    else:
+        print(f"     → 다중 시작이 오히려 {s4-s1}단계 느리다")
 
     print("\n  3. 임계값(티핑 포인트) 효과:")
     print(f"     - 낮은 임계값(0.25): {results[0]['final_adoption_rate']*100:.1f}% 채택")
     print(f"     - 높은 임계값(0.40): {results[4]['final_adoption_rate']*100:.1f}% 채택")
-    print(f"     → 임계값 0.35 전후가 확산 성공의 티핑 포인트")
+    print(f"     → 임계값이 조금 올라가면 확산이 통째로 멈춘다")
 
     return results
 

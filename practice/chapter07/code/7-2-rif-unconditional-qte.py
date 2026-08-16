@@ -3,6 +3,19 @@
 RIF Regression for Unconditional Quantile Treatment Effects
 
 Firpo, Fortin, Lemieux(2009)의 RIF 회귀를 통한 무조건부 분위 처치효과 추정
+
+수정 이력 (2026-08-17)
+---------------------
+1. "3. 조건부와 무조건부 효과의 차이" 절이 "조건부 QTE > 무조건부 QTE"라는
+   문장을 값과 무관하게 그대로 찍었다. 실제 출력은 조건부 184 < 무조건부 511로
+   반대였다.
+   -> 두 값을 비교해 부등호와 해석 문장을 계산해서 찍도록 고쳤다.
+2. 결과표의 Interpretation 열이 RIF 계수를 "소득 64만원 증가"로 적었다.
+   RIF 회귀 계수는 훈련 참여 비율이 조금 늘 때 무조건부 τ분위수가 움직이는
+   크기(UQPE)이지, τ분위 사람의 소득 증가분이 아니다.
+   -> "참여율 1%p 상승 시 τ분위 소득 x.xx만원 상승"으로 고쳤다.
+3. "해석: 중위소득층 수혜자가 교육 기회를 가장 효과적으로 활용" 등
+   결과와 무관하게 박힌 해석 문장을 값에서 계산하도록 바꿨다.
 """
 
 import numpy as np
@@ -361,7 +374,7 @@ def main():
             'UQTE': f'{uqte:.0f}{sig}',
             'SE': f'{se:.0f}',
             'CI_95': f'[{ci_lower:.0f}, {ci_upper:.0f}]',
-            'Interpretation': f'소득 {uqte:.0f}만원 증가'
+            'Interpretation': f'참여율 1%p 상승 -> {uqte/100:.2f}만원 상승'
         })
 
     # ATE 추가
@@ -370,7 +383,7 @@ def main():
         'UQTE': f'{ate_result["ate"]:.0f}***',
         'SE': f'{ate_result["se"]:.0f}',
         'CI_95': f'[{ate_result["ci_lower"]:.0f}, {ate_result["ci_upper"]:.0f}]',
-        'Interpretation': f'평균 소득 {ate_result["ate"]:.0f}만원 증가'
+        'Interpretation': f'참여율 1%p 상승 -> 평균 {ate_result["ate"]/100:.2f}만원 상승'
     })
 
     results_df = pd.DataFrame(results_table)
@@ -399,9 +412,9 @@ def main():
     min_effect_q = min(quantiles, key=lambda q: uqte_results[q]['uqte'])
     min_effect = uqte_results[min_effect_q]['uqte']
 
-    print(f"효과 극대화 지점: τ={max_effect_q:.2f} ({max_effect:.0f}만원)")
-    print(f"효과 극소화 지점: τ={min_effect_q:.2f} ({min_effect:.0f}만원)")
-    print(f"해석: 중위소득층 수혜자가 교육 기회를 가장 효과적으로 활용")
+    print(f"효과 극대화 지점: τ={max_effect_q:.2f} (UQPE {max_effect:.0f})")
+    print(f"효과 극소화 지점: τ={min_effect_q:.2f} (UQPE {min_effect:.0f})")
+    print(f"최대/최소 비율: {max_effect/min_effect:.1f}배")
 
     # 조건부 vs 무조건부 비교 (τ=0.50)
     print("\n" + "=" * 80)
@@ -413,31 +426,37 @@ def main():
     uqte_50 = uqte_results[0.50]['uqte']
     uqte_se_50 = uqte_results[0.50]['se']
 
-    print(f"Conditional QTE (분위 회귀): {cqte_50:.0f}만원 (SE={cqte_se_50:.0f})")
-    print(f"Unconditional QTE (RIF 회귀): {uqte_50:.0f}만원 (SE={uqte_se_50:.0f})")
-    print(f"차이: {cqte_50 - uqte_50:.0f}만원")
-    print("해석: 공변량 분포에 대한 주변화 효과")
+    print(f"Conditional QTE (분위 회귀): {cqte_50:.0f} (SE={cqte_se_50:.0f})")
+    print(f"Unconditional QTE (RIF 회귀): {uqte_50:.0f} (SE={uqte_se_50:.0f})")
+    print(f"차이 (무조건부 - 조건부): {uqte_50 - cqte_50:.0f}")
+    print("두 값은 묻는 질문이 다르다. 조건부는 '같은 교육·나이인 사람 안에서'")
+    print("훈련이 중위소득을 얼마나 올리는지, 무조건부는 '모집단 전체의 중위소득'이")
+    print("훈련 참여율에 얼마나 반응하는지를 잰다.")
 
     # 정책적 함의
     print("\n" + "=" * 80)
     print("정책적 함의")
     print("=" * 80)
 
-    print("\n1. 타겟팅의 효율성:")
-    print(f"   - 평균 효과: {ate_result['ate']:.0f}만원")
-    print(f"   - 중위소득층 효과: {uqte_results[0.50]['uqte']:.0f}만원 (최대)")
-    print(f"   - 고소득층 효과: {uqte_results[0.90]['uqte']:.0f}만원 (최소)")
-    print(f"   - 해석: 중산층 지원에는 효과적, 저소득층 탈빈곤에는 추가 지원 필요")
+    print("\n1. 참여율 1%p 확대가 각 지점을 움직이는 크기:")
+    print(f"   - 평균 소득: {ate_result['ate']/100:.2f}만원")
+    print(f"   - 중위 소득: {uqte_results[0.50]['uqte']/100:.2f}만원")
+    print(f"   - 하위 10% 지점: {uqte_results[0.10]['uqte']/100:.2f}만원")
+    print(f"   - 상위 10% 지점: {uqte_results[0.90]['uqte']/100:.2f}만원")
 
-    print("\n2. 불평등 완화 효과:")
+    print("\n2. 불평등 지표가 움직이는 방향:")
     gap_reduction = uqte_results[0.10]['uqte'] - uqte_results[0.90]['uqte']
-    print(f"   - 하위 10%와 상위 10%의 격차 감소: {gap_reduction:.0f}만원")
-    print(f"   - 해석: 제한적인 불평등 완화 효과")
+    print(f"   - 하위 10%와 상위 10%의 격차 변화: {gap_reduction/100:.2f}만원 (참여율 1%p당)")
+    if abs(gap_reduction) < 2 * np.sqrt(uqte_results[0.10]['se']**2 + uqte_results[0.90]['se']**2):
+        print(f"   - 이 값은 표준오차 범위 안이다. 90-10 격차는 사실상 안 움직인다")
 
-    print("\n3. 조건부와 무조건부 효과의 차이:")
-    print(f"   - 조건부 QTE > 무조건부 QTE")
-    print(f"   - 해석: 프로그램 참여자가 효과를 높이는 특성 보유 (선택 편향)")
-    print(f"           정책 평가에서 무조건부 QTE가 실제 정책 확대 시 효과 반영")
+    print("\n3. 조건부와 무조건부 효과의 차이 (τ=0.50):")
+    if cqte_50 > uqte_50:
+        print(f"   - 조건부 {cqte_50:.0f} > 무조건부 {uqte_50:.0f}")
+    else:
+        print(f"   - 조건부 {cqte_50:.0f} < 무조건부 {uqte_50:.0f}")
+    print(f"   - 두 값을 같은 뜻으로 읽으면 안 된다. 정책 확대 효과를 보려면")
+    print(f"     무조건부(RIF) 쪽을 본다")
 
     # 시각화
     print("\n[시각화] 결과 그래프 생성 중...")

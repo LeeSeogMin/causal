@@ -3,16 +3,32 @@
 Machine Learning for Quantile Regression
 
 QRF와 LightGBM을 사용한 비선형 분위 회귀
+
+수정 이력 (2026-08-17)
+---------------------
+1. quantile-forest 패키지가 없어 sklearn RandomForestRegressor로 대체되고 있었다.
+   대체 코드는 평균 예측에 (0.9 + 0.2*tau)를 곱하는 임시 보정이라 분위수 예측이
+   아니었고, 그 결과 tau=0.05의 coverage가 14%로 나왔다.
+   -> pip install quantile-forest로 실제 QRF를 설치해 쓴다. 대체 경로는 안내
+      문구만 남기고 결과를 쓰지 못하도록 예외를 던진다.
+2. 특성 중요도 그림에서 qrf.feature_importances_()를 함수처럼 호출했다.
+   실제 QRF에서는 배열 속성이라 TypeError가 나고, bare except가 그 오류를 삼켜
+   그림이 "not available"로 비어 있었다.
+   -> 속성/함수를 구분해 읽도록 고쳤다.
+3. 분위수 예측의 정확도를 MAE로 쟀다. MAE는 중위수를 최적으로 하는 손실이라
+   극단 분위수 예측을 평가하는 척도가 아니다.
+   -> 분위 회귀의 고유 손실인 pinball loss를 함께 계산해 출력한다.
+4. "90% 예측 구간이 실제로 약 90%의 관측치 포함"이라는 문장이 실제 값(73%)과
+   무관하게 박혀 있었다.
+   -> 실제 값을 읽어 판정하도록 고쳤다.
 """
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 import time
-from matplotlib import font_manager as fm
 
 # 파일 저장용 백엔드 설정
 import matplotlib
@@ -108,70 +124,28 @@ def train_quantile_forest(X_train, y_train, quantiles):
     """
     try:
         from quantile_forest import RandomForestQuantileRegressor
-
-        start_time = time.time()
-
-        qrf = RandomForestQuantileRegressor(
-            n_estimators=500,
-            min_samples_split=10,
-            min_samples_leaf=5,
-            random_state=42,
-            n_jobs=-1
+    except ImportError:
+        raise SystemExit(
+            "quantile-forest 패키지가 필요하다. 다음을 실행한 뒤 다시 돌린다.\n"
+            "    pip install quantile-forest\n"
+            "평균을 예측하는 RandomForestRegressor로 대신하면 분위수 예측이 되지 않는다."
         )
 
-        qrf.fit(X_train, y_train)
+    start_time = time.time()
 
-        training_time = time.time() - start_time
+    qrf = RandomForestQuantileRegressor(
+        n_estimators=500,
+        min_samples_split=10,
+        min_samples_leaf=5,
+        random_state=42,
+        n_jobs=-1
+    )
 
-        return qrf, training_time
+    qrf.fit(X_train, y_train)
 
-    except ImportError:
-        print("경고: quantile-forest 패키지가 설치되지 않았습니다.")
-        print("scikit-learn RandomForestRegressor로 대체합니다 (분위수 예측 제한적).")
+    training_time = time.time() - start_time
 
-        from sklearn.ensemble import RandomForestRegressor
-
-        start_time = time.time()
-
-        # 각 분위수마다 별도 모델 훈련 (비효율적이지만 대안)
-        models = {}
-        for q in quantiles:
-            rf = RandomForestRegressor(
-                n_estimators=500,
-                min_samples_split=10,
-                min_samples_leaf=5,
-                random_state=42,
-                n_jobs=-1
-            )
-            # 단순히 평균 예측 (분위수 근사 불가)
-            rf.fit(X_train, y_train)
-            models[q] = rf
-
-        training_time = time.time() - start_time
-
-        # Wrapper 클래스
-        class QRFWrapper:
-            def __init__(self, models):
-                self.models = models
-
-            def predict(self, X, quantiles=None):
-                if quantiles is None:
-                    quantiles = list(self.models.keys())
-                predictions = np.zeros((len(X), len(quantiles)))
-                for i, q in enumerate(quantiles):
-                    # 평균 예측을 모든 분위수에 사용 (제한적)
-                    base_pred = self.models[q].predict(X)
-                    # 간단한 분위수 조정
-                    if q < 0.5:
-                        predictions[:, i] = base_pred * (0.9 + 0.2 * q)
-                    else:
-                        predictions[:, i] = base_pred * (0.9 + 0.2 * q)
-                return predictions
-
-            def feature_importances_(self):
-                return self.models[0.5].feature_importances_
-
-        return QRFWrapper(models), training_time
+    return qrf, training_time
 
 def train_lightgbm_quantile(X_train, y_train, quantiles):
     """
@@ -257,6 +231,19 @@ def evaluate_coverage(y_true, y_pred, tau):
     """
     return np.mean(y_true <= y_pred)
 
+
+def pinball_loss(y_true, y_pred, tau):
+    """
+    분위 회귀의 고유 손실 (check function). 값이 작을수록 좋다.
+
+    L = mean( tau * max(y - yhat, 0) + (1 - tau) * max(yhat - y, 0) )
+
+    MAE는 tau=0.5에서만 올바른 척도다. tau=0.05 예측을 MAE로 재면
+    "값을 중앙으로 끌어올린 예측"이 이겨 버린다.
+    """
+    resid = y_true - y_pred
+    return np.mean(np.maximum(tau * resid, (tau - 1) * resid))
+
 def compute_prediction_interval(qrf_preds, lgb_preds, tau_low=0.05, tau_high=0.95):
     """
     예측 구간 계산
@@ -322,12 +309,10 @@ def visualize_results(df_test, qrf, lgb_models, quantiles, feature_names):
 
     for i, q in enumerate(quantiles):
         qrf_pred_q = qrf_preds[:, i] if qrf_preds.ndim > 1 else qrf_preds
-        qrf_mae = mean_absolute_error(y_test, qrf_pred_q)
-        qrf_maes.append(qrf_mae)
+        qrf_maes.append(pinball_loss(y_test, qrf_pred_q, q))
 
         lgb_pred_q = lgb_models[q].predict(X_test)
-        lgb_mae = mean_absolute_error(y_test, lgb_pred_q)
-        lgb_maes.append(lgb_mae)
+        lgb_maes.append(pinball_loss(y_test, lgb_pred_q, q))
 
     x_pos = np.arange(len(quantiles))
     width = 0.35
@@ -336,8 +321,8 @@ def visualize_results(df_test, qrf, lgb_models, quantiles, feature_names):
     ax.bar(x_pos + width/2, lgb_maes, width, label='LightGBM', color='gray')
 
     ax.set_xlabel('Quantile', fontsize=12)
-    ax.set_ylabel('MAE (10,000 KRW)', fontsize=12)
-    ax.set_title('Prediction Accuracy by Quantile', fontsize=13, fontweight='bold')
+    ax.set_ylabel('Pinball loss (10,000 KRW)', fontsize=12)
+    ax.set_title('Pinball Loss by Quantile (lower is better)', fontsize=13, fontweight='bold')
     ax.set_xticks(x_pos)
     ax.set_xticklabels([f'{q:.2f}' for q in quantiles])
     ax.legend()
@@ -376,24 +361,15 @@ def visualize_results(df_test, qrf, lgb_models, quantiles, feature_names):
     # (3) 특성 중요도 (QRF, τ=0.50) (흑백)
     ax = axes[1, 0]
 
-    try:
-        if hasattr(qrf, 'feature_importances_'):
-            importances = qrf.feature_importances_()
-        else:
-            importances = qrf.models[0.5].feature_importances_
+    importances = np.asarray(qrf.feature_importances_)
+    indices = np.argsort(importances)
 
-        indices = np.argsort(importances)[::-1]
-
-        ax.barh(range(len(feature_names)), importances[indices], color='gray', edgecolor='black')
-        ax.set_yticks(range(len(feature_names)))
-        ax.set_yticklabels([feature_names[i] for i in indices])
-        ax.set_xlabel('Importance', fontsize=12)
-        ax.set_title('Feature Importance (QRF, tau=0.50)', fontsize=13, fontweight='bold')
-        ax.grid(True, alpha=0.3, axis='x')
-
-    except:
-        ax.text(0.5, 0.5, 'Feature importance\nnot available',
-                ha='center', va='center', fontsize=12)
+    ax.barh(range(len(feature_names)), importances[indices], color='gray', edgecolor='black')
+    ax.set_yticks(range(len(feature_names)))
+    ax.set_yticklabels([feature_names[i] for i in indices])
+    ax.set_xlabel('Importance', fontsize=12)
+    ax.set_title('Feature Importance (QRF)', fontsize=13, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='x')
 
     # (4) 예측 구간 (단일 샘플) (흑백)
     ax = axes[1, 1]
@@ -495,26 +471,39 @@ def main():
         lgb_mae = mean_absolute_error(y_test, lgb_pred_q)
         lgb_cov = evaluate_coverage(y_test, lgb_pred_q, q) * 100
 
+        qrf_pin = pinball_loss(y_test, qrf_pred_q, q)
+        lgb_pin = pinball_loss(y_test, lgb_pred_q, q)
+
         results_table.append({
             'Quantile': f'{q:.2f}',
-            'QRF_MAE': f'{qrf_mae:.0f}',
-            'LGB_MAE': f'{lgb_mae:.0f}',
+            'QRF_Pinball': f'{qrf_pin:.2f}',
+            'LGB_Pinball': f'{lgb_pin:.2f}',
             'QRF_Coverage': f'{qrf_cov:.1f}%',
-            'LGB_Coverage': f'{lgb_cov:.1f}%'
+            'LGB_Coverage': f'{lgb_cov:.1f}%',
+            'Ideal_Coverage': f'{q*100:.0f}%'
         })
 
     results_df = pd.DataFrame(results_table)
     print(results_df.to_string(index=False))
 
     # 평균 성능
-    qrf_mae_avg = np.mean([mean_absolute_error(y_test, qrf_preds[:, i] if qrf_preds.ndim > 1 else qrf_preds)
-                           for i in range(len(quantiles))])
-    lgb_mae_avg = np.mean([mean_absolute_error(y_test, lgb_preds[q])
+    qrf_pin_avg = np.mean([pinball_loss(y_test, qrf_preds[:, i], q)
+                           for i, q in enumerate(quantiles)])
+    lgb_pin_avg = np.mean([pinball_loss(y_test, lgb_preds[q], q)
                            for q in quantiles])
 
-    print(f"\n평균 MAE:")
-    print(f"  QRF: {qrf_mae_avg:.0f} 만원")
-    print(f"  LightGBM: {lgb_mae_avg:.0f} 만원")
+    print(f"\n평균 pinball loss (작을수록 좋다):")
+    print(f"  QRF: {qrf_pin_avg:.2f}")
+    print(f"  LightGBM: {lgb_pin_avg:.2f}")
+
+    # coverage 오차
+    qrf_cov_err = np.mean([abs(evaluate_coverage(y_test, qrf_preds[:, i], q) - q)
+                           for i, q in enumerate(quantiles)]) * 100
+    lgb_cov_err = np.mean([abs(evaluate_coverage(y_test, lgb_preds[q], q) - q)
+                           for q in quantiles]) * 100
+    print(f"\n평균 coverage 오차 (|실제 - 이상|, 작을수록 좋다):")
+    print(f"  QRF: {qrf_cov_err:.1f}%p")
+    print(f"  LightGBM: {lgb_cov_err:.1f}%p")
 
     print(f"\n훈련 시간:")
     print(f"  QRF: {qrf_time:.1f}초")
@@ -548,17 +537,23 @@ def main():
     print("방법론적 및 실무적 시사점")
     print("=" * 80)
 
-    print("\n1. 정확도 vs 효율성 트레이드오프:")
-    accuracy_diff_pct = (lgb_mae_avg - qrf_mae_avg) / qrf_mae_avg * 100
+    print("\n1. 정확도와 훈련 시간:")
+    pin_diff_pct = (lgb_pin_avg - qrf_pin_avg) / qrf_pin_avg * 100
     time_ratio = lgb_time / qrf_time
-    print(f"   - LightGBM이 평균 MAE에서 {abs(accuracy_diff_pct):.1f}% 우수")
-    print(f"   - 훈련 시간은 QRF의 {time_ratio:.1f}배")
-    print(f"   - 권장: 탐색적 분석은 QRF, 프로덕션 배포는 LightGBM")
+    better = 'LightGBM' if lgb_pin_avg < qrf_pin_avg else 'QRF'
+    print(f"   - 평균 pinball loss는 {better}가 {abs(pin_diff_pct):.1f}% 낮다")
+    print(f"   - 훈련 시간: QRF {qrf_time:.1f}초(1회), LightGBM {lgb_time:.1f}초"
+          f"({len(quantiles)}회) = QRF의 {time_ratio:.1f}배")
+    print(f"   - QRF는 한 번 훈련하면 어떤 분위수든 바로 예측한다")
 
-    print("\n2. 예측 구간의 실용성:")
-    print(f"   - 90% 예측 구간이 실제로 약 90%의 관측치 포함")
-    print(f"   - QRF: {qrf_actual_cov:.1f}%, LightGBM: {lgb_actual_cov:.1f}%")
-    print(f"   - 해석: 예측 불확실성을 정확히 정량화")
+    print("\n2. 90% 예측 구간이 실제로 담은 비율:")
+    print(f"   - QRF: {qrf_actual_cov:.1f}%, LightGBM: {lgb_actual_cov:.1f}% (목표 90%)")
+    for name, cov in [('QRF', qrf_actual_cov), ('LightGBM', lgb_actual_cov)]:
+        if cov < 85:
+            print(f"   - {name}의 구간은 목표에 {90-cov:.1f}%p 모자란다. "
+                  f"그대로 쓰면 위험을 낮잡는다")
+    print(f"   - 구간 너비: QRF {pi_metrics['qrf_width']:.0f}만원, "
+          f"LightGBM {pi_metrics['lgb_width']:.0f}만원")
 
     # 시각화
     print("\n[시각화] 결과 그래프 생성 중...")

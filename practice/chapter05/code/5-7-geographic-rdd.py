@@ -1,3 +1,14 @@
+"""
+제5장: 경계선을 배정 변수로 쓰는 RDD
+
+수정 이력
+---------
+2026-08-17
+저장 경로: 그림을 `diagrams/5-3.png`에 저장하고 있었다. `diagrams/`는 강의노트
+개념도 폴더이므로, 이 스크립트를 돌릴 때마다 개념도 5-3.png가 실습 그림으로
+덮어써졌다. 저장 위치를 스크립트와 같은 폴더의 `5-7-geographic-rdd.png`로 바꿨다.
+"""
+
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
@@ -5,7 +16,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial import distance
 import os
 
-# 한글 폰트 설정 (플랫폼 독립적)
+# 그래프 레이블이 전부 영문이므로 기본 폰트를 쓴다
 plt.rcParams['font.family'] = 'DejaVu Sans'
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -66,13 +77,9 @@ plt.title('Geographic RDD: Spatial Distribution')
 plt.xlabel('Longitude')
 plt.ylabel('Latitude')
 plt.legend()
-# 이미지 저장 (현재 작업 디렉토리 기준 상대 경로)
+# 이미지 저장 (스크립트와 같은 폴더)
 script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
-save_path = os.path.join(project_root, 'diagrams', '5-3.png')
-
-# 디렉토리가 없으면 생성
-os.makedirs(os.path.dirname(save_path), exist_ok=True)
+save_path = os.path.join(script_dir, '5-7-geographic-rdd.png')
 
 plt.savefig(save_path, dpi=300, bbox_inches='tight')
 print(f"그래프 저장 완료: {save_path}")

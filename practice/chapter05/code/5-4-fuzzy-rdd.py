@@ -1,8 +1,17 @@
 """
 제5장: Fuzzy RDD 추정
 2단계 최소제곱법(2SLS)을 이용한 불완전 순응 상황의 RDD 추정
+
+수정 이력
+---------
+2026-08-17
+1) 한글 폰트: `font.family`가 'DejaVu Sans'였다. DejaVu Sans에는 한글 글리프가
+   없어 (d) 순응 패턴 원그래프의 항목 이름이 빈 사각형으로 저장됐다.
+   설치된 한글 폰트를 찾아 지정하도록 고쳤다.
+2) 저장 경로 안내: print 문이 실제 저장 위치와 다른 경로를 찍었다. 실제 경로를 찍는다.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -13,8 +22,12 @@ import statsmodels.formula.api as smf
 from linearmodels.iv import IV2SLS
 from matplotlib import font_manager as fm
 
-# 한글 폰트 설정 (플랫폼 독립적)
-plt.rcParams['font.family'] = 'DejaVu Sans'
+# 한글 폰트 설정: 설치된 한글 폰트를 순서대로 찾아 지정한다
+_installed = {f.name for f in fm.fontManager.ttflist}
+for _name in ['Malgun Gothic', 'AppleGothic', 'NanumGothic', 'Noto Sans CJK KR']:
+    if _name in _installed:
+        plt.rcParams['font.family'] = _name
+        break
 plt.rcParams['axes.unicode_minus'] = False
 
 # 랜덤 시드 설정
@@ -250,8 +263,9 @@ for autotext in autotexts:
 ax.set_title('(d) 순응 패턴 분포', fontsize=12, fontweight='bold')
 
 plt.tight_layout()
-plt.savefig('5-4-fuzzy-rdd.png', dpi=300, bbox_inches='tight')
-print("그래프 저장 완료: practice/chapter05/5-4-fuzzy-rdd.png")
+_out = os.path.join(base_path, '5-4-fuzzy-rdd.png')
+plt.savefig(_out, dpi=300, bbox_inches='tight')
+print(f"그래프 저장 완료: {_out}")
 
 # 6. 최종 요약
 print("\n" + "=" * 80)

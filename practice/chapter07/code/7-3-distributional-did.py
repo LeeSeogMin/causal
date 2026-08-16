@@ -3,6 +3,24 @@
 Distributional Difference-in-Differences and CIC
 
 패널 데이터에서 분포적 처치효과 추정
+
+수정 이력 (2026-08-17)
+---------------------
+1. 단위 환산이 틀렸다. outcome은 시간당 임금을 100원 단위로 담고 있는데,
+   해석 문장은 값을 10으로 나눈 뒤 뒤에 "00원"을 붙였다. QTT=7.5(=750원)이
+   "약 100원 증가"로 찍혔고, 전통적 DID 4(=400원)도 "4원"으로 찍혔다.
+   -> 모든 해석 출력에서 100을 곱해 원 단위로 바꿨다.
+2. 결과표의 '***'가 검정 없이 문자열로 박혀 있었다. 분위수 차이에는 닫힌 형태
+   표준오차가 없다.
+   -> 개인 단위 부트스트랩(B=500)으로 QTT의 표준오차와 95% 신뢰구간을 구하고,
+      그 결과로 유의성 표시를 붙이도록 고쳤다.
+3. 전통적 DID 회귀가 HC3만 썼다. 한 사람이 사전·사후 두 행으로 들어가므로
+   개인 안에서 오차가 상관된다.
+   -> id로 묶은 클러스터 강건 표준오차로 바꿨다.
+4. "평균은 하위 분위의 큰 증가에 의해 주도됨", "CIC가 비선형 시간 추세를 더 잘
+   포착", "정책이 의도한 재분배 효과 성공적 달성" 같은 문장이 값과 무관하게
+   박혀 있었다.
+   -> 값에서 계산하거나 삭제했다.
 """
 
 import numpy as np
@@ -237,6 +255,50 @@ def estimate_cic(df_panel, quantiles):
 
     return np.array(qtt_cic)
 
+def bootstrap_qtt(df_panel, quantiles, n_boot=500, seed=42):
+    """
+    개인 단위 부트스트랩으로 QTT(DID)와 QTT(CIC)의 표준오차를 구한다.
+
+    분위수의 차이에는 닫힌 형태 표준오차가 없다. 사람을 통째로 다시 뽑아
+    (사전·사후 두 행을 함께 유지) 같은 계산을 반복하고, 추정치의 흩어짐을 잰다.
+
+    Returns
+    -------
+    dict : QTT별 표준오차와 95% 신뢰구간
+    """
+    rng = np.random.default_rng(seed)
+
+    treat_ids = df_panel[df_panel['group'] == 'treat']['id'].unique()
+    control_ids = df_panel[df_panel['group'] == 'control']['id'].unique()
+    indexed = df_panel.set_index('id')
+
+    boot_did = np.zeros((n_boot, len(quantiles)))
+    boot_cic = np.zeros((n_boot, len(quantiles)))
+
+    for b in range(n_boot):
+        pick_t = rng.choice(treat_ids, size=len(treat_ids), replace=True)
+        pick_c = rng.choice(control_ids, size=len(control_ids), replace=True)
+        sample = pd.concat([indexed.loc[pick_t], indexed.loc[pick_c]]).reset_index()
+
+        boot_did[b] = estimate_qtt_distributional_did(sample, quantiles)
+        boot_cic[b] = estimate_cic(sample, quantiles)
+
+    return {
+        'did_se': boot_did.std(axis=0, ddof=1),
+        'did_lo': np.percentile(boot_did, 2.5, axis=0),
+        'did_hi': np.percentile(boot_did, 97.5, axis=0),
+        'cic_se': boot_cic.std(axis=0, ddof=1),
+        'cic_lo': np.percentile(boot_cic, 2.5, axis=0),
+        'cic_hi': np.percentile(boot_cic, 97.5, axis=0),
+        'n_boot': n_boot
+    }
+
+
+def stars_from_ci(lo, hi):
+    """부트스트랩 95% 신뢰구간이 0을 포함하지 않으면 * 를 붙인다."""
+    return '*' if (lo > 0 or hi < 0) else ''
+
+
 def estimate_traditional_did(df_panel):
     """
     전통적 DID 추정 (평균 효과)
@@ -256,9 +318,9 @@ def estimate_traditional_did(df_panel):
     df_temp['post'] = (df_temp['period'] == 'post').astype(int)
     df_temp['treat_post'] = df_temp['treat'] * df_temp['post']
 
-    # DID 회귀
+    # DID 회귀 (같은 사람이 두 행으로 들어가므로 id로 묶어 클러스터 강건 SE 사용)
     mod = smf.ols('outcome ~ treat + post + treat_post', data=df_temp)
-    res = mod.fit(cov_type='HC3')
+    res = mod.fit(cov_type='cluster', cov_kwds={'groups': df_temp['id']})
 
     return {
         'did_effect': res.params['treat_post'],
@@ -413,36 +475,48 @@ def main():
     print("\n[4단계] 전통적 DID 추정 (평균 효과)")
     did_result = estimate_traditional_did(df_panel)
 
+    # 부트스트랩 표준오차
+    print("\n[5단계] 개인 단위 부트스트랩으로 QTT 표준오차 계산 (B=500)")
+    boot = bootstrap_qtt(df_panel, quantiles, n_boot=500)
+
     # 결과 출력
     print("\n" + "=" * 80)
     print("Distributional DID vs CIC 비교 결과 (최저임금 정책)")
-    print("단위: 100원/시간")
+    print("outcome 단위는 100원/시간. 아래 원 단위 열은 100을 곱한 값이다.")
     print("=" * 80)
 
     results_table = []
     for i, q in enumerate(quantiles):
         results_table.append({
             'Quantile': f'{q:.2f}',
-            'QTT_DID': f'{qtt_did[i]:.0f}***',
-            'QTT_CIC': f'{qtt_cic[i]:.0f}***',
-            'Difference': f'{qtt_cic[i] - qtt_did[i]:.0f}',
-            'Interpretation': f'임금 약 {(qtt_did[i]+qtt_cic[i])/2/10:.0f}00원 증가'
+            'QTT_DID': f'{qtt_did[i]:.1f}{stars_from_ci(boot["did_lo"][i], boot["did_hi"][i])}',
+            'SE_DID': f'{boot["did_se"][i]:.2f}',
+            'CI95_DID': f'[{boot["did_lo"][i]:.1f}, {boot["did_hi"][i]:.1f}]',
+            'QTT_CIC': f'{qtt_cic[i]:.1f}{stars_from_ci(boot["cic_lo"][i], boot["cic_hi"][i])}',
+            'Won_DID': f'{qtt_did[i]*100:.0f}원'
         })
 
     results_df = pd.DataFrame(results_table)
     print(results_df.to_string(index=False))
 
-    print(f"\n전통적 DID (평균 효과): {did_result['did_effect']:.0f}*** (SE={did_result['se']:.0f})")
+    print(f"\n전통적 DID (평균 효과): {did_result['did_effect']:.2f} "
+          f"(= {did_result['did_effect']*100:.0f}원/시간, 클러스터 SE={did_result['se']:.2f}, "
+          f"p={did_result['pvalue']:.4f})")
 
     # 방법론 간 차이 분석
     print("\n" + "=" * 80)
-    print("방법론 간 차이 분석")
+    print("두 방법의 추정값 차이")
     print("=" * 80)
 
-    avg_diff = np.mean(qtt_cic - qtt_did)
-    print(f"평균 차이 (CIC - DID): {avg_diff:.0f} 원/시간")
-    print(f"하위 분위(τ≤0.25)에서 CIC가 약 {np.mean((qtt_cic[:3] - qtt_did[:3])/qtt_did[:3])*100:.1f}% 더 큰 효과 추정")
-    print("이유: CIC가 비선형 시간 추세를 더 잘 포착")
+    avg_diff = np.mean(np.abs(qtt_cic - qtt_did))
+    print(f"분위별 차이의 평균 절댓값: {avg_diff*100:.0f}원/시간")
+    print(f"가장 큰 차이: τ={quantiles[int(np.argmax(np.abs(qtt_cic-qtt_did)))]:.2f}에서 "
+          f"{np.max(np.abs(qtt_cic-qtt_did))*100:.0f}원")
+    print(f"부트스트랩 SE(τ=0.05, DID): {boot['did_se'][0]*100:.0f}원")
+    if np.max(np.abs(qtt_cic - qtt_did)) < np.max(boot['did_se']):
+        print("가장 큰 차이도 부트스트랩 표준오차보다 작다. 두 방법의 결론은 갈리지 않는다.")
+    else:
+        print("차이가 부트스트랩 표준오차보다 크다. 어느 가정을 쓸지 밝혀야 한다.")
 
     # 불평등 지표 변화
     print("\n" + "=" * 80)
@@ -456,41 +530,38 @@ def main():
     print(f"Gini 계수 변화: {ineq['gini_change']:.3f}")
     print(f"  - 사전: {ineq['gini_pre']:.3f}")
     print(f"  - 사후: {ineq['gini_post']:.3f}")
-    print("해석: 최저임금 정책이 임금 분포 압축 효과를 가짐 (불평등 감소)")
 
     # 집계 효과
     print("\n" + "=" * 80)
     print("집계 효과 (Aggregate Effects)")
     print("=" * 80)
 
-    median_qtt = (qtt_did[quantiles.index(0.50)] + qtt_cic[quantiles.index(0.50)]) / 2
-    print(f"평균 임금 변화 (전통적 DID): {did_result['did_effect']:.0f}원 증가***")
-    print(f"중위 임금 변화 (Distributional DID): {median_qtt:.0f}원 증가")
-    print(f"차이: {did_result['did_effect'] - median_qtt:.0f}원")
-    print("차이 이유: 분포의 비대칭성 (하위 꼬리의 큰 증가가 평균을 끌어올림)")
+    median_qtt = qtt_did[quantiles.index(0.50)]
+    print(f"평균 임금 변화 (전통적 DID): {did_result['did_effect']*100:.0f}원 증가")
+    print(f"중위 임금 변화 (Distributional DID): {median_qtt*100:.0f}원 증가")
+    print(f"차이: {(did_result['did_effect'] - median_qtt)*100:.0f}원")
 
     # 정책적 시사점
     print("\n" + "=" * 80)
     print("정책적 시사점")
     print("=" * 80)
 
-    print("\n1. 타겟팅의 정확성:")
-    effect_05 = (qtt_did[0] + qtt_cic[0]) / 2
-    effect_90 = (qtt_did[-1] + qtt_cic[-1]) / 2
-    print(f"   - 하위 5% 근로자: 시간당 {effect_05/10:.0f}00원 증가")
-    print(f"   - 상위 10% 근로자: 시간당 {effect_90/10:.0f}00원 변화")
-    print(f"   - 해석: 정책이 의도한 재분배 효과 성공적 달성")
+    print("\n1. 분위별 효과 크기:")
+    print(f"   - 하위 5% 지점: 시간당 {qtt_did[0]*100:.0f}원 증가")
+    print(f"   - 중위 지점: 시간당 {median_qtt*100:.0f}원 증가")
+    print(f"   - 상위 10% 지점: 시간당 {qtt_did[-1]*100:.0f}원 변화")
+    print(f"   - 하위와 상위의 비: {qtt_did[0]/qtt_did[-1]:.1f}배")
 
-    print("\n2. 평균 효과의 오해 소지:")
-    print(f"   - 전통적 DID: {did_result['did_effect']:.0f}원 (평균)")
-    print(f"   - 중위 효과: {median_qtt:.0f}원")
-    print(f"   - 해석: 평균은 하위 분위의 큰 증가에 의해 주도됨")
-    print(f"           대다수 근로자의 경험과는 괴리")
+    print("\n2. 평균 하나만 보고했을 때 놓치는 것:")
+    print(f"   - 전통적 DID(평균): {did_result['did_effect']*100:.0f}원")
+    print(f"   - 분위별 범위: {qtt_did.min()*100:.0f}원 ~ {qtt_did.max()*100:.0f}원")
+    print(f"   - 평균값 하나로는 이 {(qtt_did.max()-qtt_did.min())*100:.0f}원의 폭이 보이지 않는다")
 
-    print("\n3. 불평등 완화 효과:")
-    print(f"   - 90-10 비율 {abs(ineq['ratio_pct_change']):.1f}% 감소")
-    print(f"   - Gini 계수 {abs(ineq['gini_change']):.3f} 감소")
-    print(f"   - 해석: 실질적 불평등 완화 효과 확인")
+    print("\n3. 불평등 지표 변화:")
+    print(f"   - 90-10 비율: {ineq['ratio_90_10_pre']:.2f} -> {ineq['ratio_90_10_post']:.2f} "
+          f"({ineq['ratio_pct_change']:.1f}%)")
+    print(f"   - Gini 계수: {ineq['gini_pre']:.3f} -> {ineq['gini_post']:.3f} "
+          f"({ineq['gini_change']:.3f})")
 
     # 시각화
     print("\n[시각화] 결과 그래프 생성 중...")

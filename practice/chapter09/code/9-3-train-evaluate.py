@@ -1,30 +1,65 @@
 """
-Chapter 9 - Deep Learning Basics and Policy Time Series Forecasting
-9.5.3 Model Training and Evaluation
+Chapter 9 - Deep Learning Basics and Time Series Forecasting
+9.5 기준선과 딥러닝 비교
 
-LSTM 모델 학습 및 평가 파이프라인
-정책 단계별 성능 분석 및 어텐션 가중치 시각화
+단순 기준선 세 개(직전 값, 24시간 전 값, 이동평균)를 먼저 세우고,
+LSTM·GRU가 그 기준선을 이기는지 같은 테스트 구간에서 확인한다.
+
+수정 이력
+---------
+2026-08-17
+1. 경로 오류 수정
+   증상: `OUTPUT_DIR`이 저장소 루트 기준 상대경로여서 code 폴더에서 실행하면
+         데이터 로드가 실패했다.
+   수정: `__file__` 기준 절대경로로 바꿨다.
+
+2. 그림 저장 (`plt.show()` → `savefig`)
+   PNG 세 장을 code 폴더에 남긴다.
+
+3. 단순 기준선 추가 (이 스크립트의 핵심 수정)
+   증상: 딥러닝 세 모델끼리만 비교해, "이 정확도가 좋은가"를 판단할 기준이 없었다.
+   수정: 직전 값 반복(persistence), 24시간 전 값 반복(seasonal naive),
+         최근 24시간 이동평균 세 가지를 같은 테스트 구간에서 계산해 함께 보고한다.
+
+4. 지어낸 결론 출력 삭제
+   증상: 실행 결과와 무관하게 "Test MAPE 3~5% 수준", "산업 표준 5% 이내의 우수한
+         정확도" 같은 문장이 항상 출력됐다. 실제 값이 그와 달라도 그대로 찍혔다.
+   수정: 실제 계산값으로 기준선 대비 판정을 출력하도록 바꿨다.
+
+5. `analyze_policy_phases` 이름·설명 수정
+   증상: 테스트 구간을 3등분해 놓고 '정책 도입기/평가기/정착기'라고 불렀다.
+         재생에너지 정책은 전체 시계열의 50% 지점에서 시작하므로 테스트 구간
+         전체가 이미 정책 시행 후다. 세 구간은 정책 단계가 아니라 시간 3등분이다.
+   수정: `analyze_test_thirds`로 바꾸고 '테스트 구간 전반부/중반부/후반부'로 적었다.
+
+6. RMSE 추가
+   MAE만 보고하던 것을 RMSE와 함께 보고한다. 큰 오차에 얼마나 벌점을 주는지
+   두 지표를 나란히 놓고 읽을 수 있게 했다.
 """
 
+import os
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import warnings
-import sys
-import os
 
 import importlib.util
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정
 matplotlib.rc('font', family='Arial')
 plt.rcParams['axes.unicode_minus'] = False
 
-# 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter09/data/'
+# 경로 (스크립트 위치 기준)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, os.pardir, 'data') + os.sep
+FIG_DIR = BASE_DIR + os.sep
+
+tf.random.set_seed(42)
+np.random.seed(42)
 
 def load_lstm_model_module():
     module_path = os.path.join(os.path.dirname(__file__), '9-2-lstm-model.py')
@@ -76,6 +111,47 @@ def load_data():
     print(f"  - 테스트 세트: {len(X_test):,} 샘플")
 
     return X_train, X_val, X_test, y_train, y_val, y_test
+
+def compute_metrics(y_true, y_pred):
+    """
+    원 단위(MW)에서 세 지표를 계산한다.
+
+    RMSE : 오차를 제곱해 평균 낸 뒤 제곱근. 큰 오차 하나가 값을 크게 올린다.
+    MAE  : 오차 절댓값의 평균. 모든 오차를 같은 비중으로 센다.
+    MAPE : 오차를 실제값으로 나눈 백분율의 평균. 단위가 다른 시계열끼리 비교할 때 쓴다.
+    """
+    err = y_true - y_pred
+    rmse = float(np.sqrt(np.mean(err ** 2)))
+    mae = float(np.mean(np.abs(err)))
+    mape = float(np.mean(np.abs(err / y_true)) * 100)
+    return {'rmse': rmse, 'mae': mae, 'mape': mape}
+
+
+def compute_baselines(X_test, scaler_params):
+    """
+    학습 없이 만드는 단순 기준선 세 개.
+
+    persistence  : 마지막 관측값을 24시간 내내 그대로 쓴다.
+    seasonal_24h : 어제 같은 시각의 값을 그대로 쓴다.
+    moving_avg   : 최근 24시간 평균을 24시간 내내 그대로 쓴다.
+
+    셋 다 파라미터가 0개다. 딥러닝 모델은 이 셋을 이겨야 쓸 값어치가 생긴다.
+    """
+    center = scaler_params['center']
+    scale = scaler_params['scale']
+
+    # X_test[:, :, 0]이 정규화된 demand다.
+    last_value = X_test[:, -1, 0]                       # (n,)
+    prev_day = X_test[:, -24:, 0]                       # (n, 24)
+    mean_24h = X_test[:, -24:, 0].mean(axis=1)          # (n,)
+
+    preds = {
+        'persistence': np.repeat(last_value[:, None], 24, axis=1),
+        'seasonal_24h': prev_day,
+        'moving_avg_24h': np.repeat(mean_24h[:, None], 24, axis=1),
+    }
+    return {k: v * scale + center for k, v in preds.items()}
+
 
 def train_model(model, X_train, y_train, X_val, y_val, model_name):
     """
@@ -165,67 +241,37 @@ def evaluate_model(model, X_test, y_test, scaler_params, model_name):
     y_pred = y_pred_normalized * scale + center
     y_true = y_test * scale + center
 
-    # 평가 지표 계산
-    mse = np.mean((y_true - y_pred) ** 2)
-    mae = np.mean(np.abs(y_true - y_pred))
-    mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+    metrics = compute_metrics(y_true, y_pred)
 
-    print(f"  - Test MSE: {mse:.4f}")
-    print(f"  - Test MAE: {mae:.2f} MW")
-    print(f"  - Test MAPE: {mape:.2f}%")
-
-    # 정규화된 데이터 기준 MSE (문서의 0.03~0.04 비교용)
-    normalized_mse = np.mean((y_test - y_pred_normalized) ** 2)
-    print(f"  - Normalized MSE: {normalized_mse:.4f}")
-
-    metrics = {
-        'mse': mse,
-        'mae': mae,
-        'mape': mape,
-        'normalized_mse': normalized_mse
-    }
+    print(f"  - Test RMSE: {metrics['rmse']:.1f} MW")
+    print(f"  - Test MAE : {metrics['mae']:.1f} MW")
+    print(f"  - Test MAPE: {metrics['mape']:.2f}%")
 
     return metrics, y_pred
 
-def analyze_policy_phases(y_true, y_pred):
+def analyze_test_thirds(y_true, y_pred):
     """
-    정책 단계별 성능 분석
+    테스트 구간을 시간 순서로 3등분해 구간별 MAE를 본다.
 
-    Parameters:
-    -----------
-    y_true, y_pred : ndarray
-        실제값과 예측값
-
-    Returns:
-    --------
-    phase_metrics : dict
-        단계별 MAE
+    주의: 이 세 구간은 '정책 단계'가 아니다. 재생에너지 정책 효과는 전체 시계열의
+    50% 지점에서 시작하므로 테스트 구간(뒤 15%)은 전부 정책 시행 후다.
+    시간이 지날수록 오차가 커지는지만 확인하는 용도다.
     """
-    print("\n정책 단계별 성능 분석...")
+    print("\n테스트 구간 3등분 MAE...")
 
     n_samples = y_true.shape[0]
+    a = int(n_samples * 0.3)
+    b = int(n_samples * 0.7)
 
-    # 정책 단계 구분 (임의 설정)
-    # 도입기: 첫 30%, 평가기: 중간 40%, 정착기: 마지막 30%
-    intro_end = int(n_samples * 0.3)
-    eval_end = int(n_samples * 0.7)
+    mae_1 = float(np.mean(np.abs(y_true[:a] - y_pred[:a])))
+    mae_2 = float(np.mean(np.abs(y_true[a:b] - y_pred[a:b])))
+    mae_3 = float(np.mean(np.abs(y_true[b:] - y_pred[b:])))
 
-    # 각 단계별 MAE
-    mae_intro = np.mean(np.abs(y_true[:intro_end] - y_pred[:intro_end]))
-    mae_eval = np.mean(np.abs(y_true[intro_end:eval_end] - y_pred[intro_end:eval_end]))
-    mae_stable = np.mean(np.abs(y_true[eval_end:] - y_pred[eval_end:]))
+    print(f"  - 전반부 MAE: {mae_1:.1f} MW")
+    print(f"  - 중반부 MAE: {mae_2:.1f} MW")
+    print(f"  - 후반부 MAE: {mae_3:.1f} MW")
 
-    print(f"  - 정책 도입기 MAE: {mae_intro:.2f} MW")
-    print(f"  - 정책 평가기 MAE: {mae_eval:.2f} MW")
-    print(f"  - 정책 정착기 MAE: {mae_stable:.2f} MW")
-
-    phase_metrics = {
-        'intro': mae_intro,
-        'eval': mae_eval,
-        'stable': mae_stable
-    }
-
-    return phase_metrics
+    return {'first': mae_1, 'middle': mae_2, 'last': mae_3}
 
 def visualize_training_results(histories, model_names):
     """학습 곡선 시각화"""
@@ -274,53 +320,77 @@ def visualize_training_results(histories, model_names):
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.show()
-    # Visualization displayed (not saved)
+    plt.savefig(FIG_DIR + '9-3-learning-curves.png', dpi=130, bbox_inches='tight')
+    plt.close()
 
-def visualize_predictions(y_true, y_pred, model_name):
-    """예측 결과 시각화"""
-    fig, axes = plt.subplots(2, 1, figsize=(14, 8))
+def visualize_predictions(y_true, y_pred, baselines, all_metrics, model_name):
+    """예측 결과와 기준선 비교 시각화"""
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
 
-    # 처음 7일 (168시간) 시각화
-    plot_hours = 168
+    horizon = y_true.shape[1]          # 24시간
+    time_index = np.arange(1, horizon + 1)
+    w = 0                              # 테스트 구간 첫 창
 
-    # (1) 예측 vs 실제
-    ax1 = axes[0]
-    time_index = np.arange(plot_hours)
-
-    ax1.plot(time_index, y_true[0, :plot_hours],
-            label='Actual', color='black', linewidth=2, alpha=0.8)
-    ax1.plot(time_index, y_pred[0, :plot_hours],
-            label='Predicted', color='red', linewidth=2, alpha=0.7)
-    ax1.fill_between(time_index,
-                     y_true[0, :plot_hours],
-                     y_pred[0, :plot_hours],
-                     alpha=0.2, color='gray')
-
-    ax1.set_xlabel('Hours', fontsize=11)
-    ax1.set_ylabel('Electricity Demand (MW)', fontsize=11)
-    ax1.set_title(f'(a) {model_name} - 7-Day Forecast', fontsize=12, fontweight='bold')
-    ax1.legend(loc='upper right', fontsize=10)
+    # (a) 24시간 예측 하나를 펼쳐 보기
+    ax1 = axes[0, 0]
+    ax1.plot(time_index, y_true[w], label='Actual', color='black', linewidth=2.5)
+    ax1.plot(time_index, y_pred[w], label=model_name, color='#c0392b',
+             linewidth=2, marker='o', markersize=3)
+    ax1.plot(time_index, baselines['persistence'][w], label='Persistence',
+             color='#2c6fbb', linewidth=1.5, linestyle='--')
+    ax1.plot(time_index, baselines['seasonal_24h'][w], label='Yesterday same hour',
+             color='#2e8b57', linewidth=1.5, linestyle=':')
+    ax1.set_xlabel('Forecast horizon (hours ahead)', fontsize=11)
+    ax1.set_ylabel('Demand (MW)', fontsize=11)
+    ax1.set_title('(a) One 24-Hour Forecast Window', fontsize=12, fontweight='bold')
+    ax1.legend(loc='best', fontsize=9)
     ax1.grid(True, alpha=0.3)
 
-    # (2) 오차 분포
-    ax2 = axes[1]
-    errors = y_true.flatten() - y_pred.flatten()
-
-    ax2.hist(errors, bins=50, color='steelblue', alpha=0.7, edgecolor='black')
-    ax2.axvline(0, color='red', linestyle='--', linewidth=2, label='Zero Error')
+    # (b) 오차 분포
+    ax2 = axes[0, 1]
+    errors = (y_true - y_pred).flatten()
+    ax2.hist(errors, bins=50, color='steelblue', alpha=0.75, edgecolor='black')
+    ax2.axvline(0, color='red', linestyle='--', linewidth=2, label='Zero error')
     ax2.axvline(errors.mean(), color='green', linestyle='--', linewidth=2,
-               label=f'Mean Error: {errors.mean():.2f}')
-
-    ax2.set_xlabel('Prediction Error (MW)', fontsize=11)
+                label=f'Mean: {errors.mean():.0f} MW')
+    ax2.set_xlabel('Prediction error (MW)', fontsize=11)
     ax2.set_ylabel('Frequency', fontsize=11)
-    ax2.set_title('(b) Error Distribution', fontsize=12, fontweight='bold')
-    ax2.legend(loc='upper right', fontsize=10)
+    ax2.set_title(f'(b) Error Distribution - {model_name}', fontsize=12, fontweight='bold')
+    ax2.legend(loc='upper right', fontsize=9)
     ax2.grid(True, alpha=0.3)
 
+    # (c) 방법별 RMSE / MAE
+    ax3 = axes[1, 0]
+    names = list(all_metrics.keys())
+    rmses = [all_metrics[n]['rmse'] for n in names]
+    maes = [all_metrics[n]['mae'] for n in names]
+    xpos = np.arange(len(names))
+    ax3.bar(xpos - 0.2, rmses, 0.4, label='RMSE', color='#c0392b', alpha=0.8)
+    ax3.bar(xpos + 0.2, maes, 0.4, label='MAE', color='#2c6fbb', alpha=0.8)
+    ax3.set_xticks(xpos)
+    ax3.set_xticklabels(names, rotation=30, ha='right', fontsize=9)
+    ax3.set_ylabel('Error (MW)', fontsize=11)
+    ax3.set_title('(c) RMSE and MAE by Method', fontsize=12, fontweight='bold')
+    ax3.legend(loc='upper right', fontsize=9)
+    ax3.grid(True, alpha=0.3, axis='y')
+
+    # (d) 예측 시계별 MAE
+    ax4 = axes[1, 1]
+    ax4.plot(time_index, np.mean(np.abs(y_true - y_pred), axis=0),
+             label=model_name, color='#c0392b', linewidth=2, marker='o', markersize=3)
+    ax4.plot(time_index, np.mean(np.abs(y_true - baselines['persistence']), axis=0),
+             label='Persistence', color='#2c6fbb', linewidth=1.5, linestyle='--')
+    ax4.plot(time_index, np.mean(np.abs(y_true - baselines['seasonal_24h']), axis=0),
+             label='Yesterday same hour', color='#2e8b57', linewidth=1.5, linestyle=':')
+    ax4.set_xlabel('Forecast horizon (hours ahead)', fontsize=11)
+    ax4.set_ylabel('MAE (MW)', fontsize=11)
+    ax4.set_title('(d) MAE by Forecast Horizon', fontsize=12, fontweight='bold')
+    ax4.legend(loc='best', fontsize=9)
+    ax4.grid(True, alpha=0.3)
+
     plt.tight_layout()
-    plt.show()
-    # Visualization displayed (not saved)
+    plt.savefig(FIG_DIR + '9-3-baseline-vs-deep.png', dpi=130, bbox_inches='tight')
+    plt.close()
 
 def visualize_attention_weights(model, X_test):
     """어텐션 가중치 시각화"""
@@ -360,19 +430,20 @@ def visualize_attention_weights(model, X_test):
     ax2.grid(True, alpha=0.3, axis='y')
 
     plt.tight_layout()
-    plt.show()
-    # Visualization displayed (not saved)
+    plt.savefig(FIG_DIR + '9-3-attention.png', dpi=130, bbox_inches='tight')
+    plt.close()
 
     # 주요 시점 분석
     top_5_indices = np.argsort(avg_attention_scores)[-5:][::-1]
-    print(f"\n  - 최고 어텐션 시점 (Top 5):")
+    print(f"  - 균등 배분값 1/168 = {1/168:.4f}")
+    print(f"  - 가중치가 높은 시점 5개 (창의 시작을 0으로 센 위치):")
     for i, idx in enumerate(top_5_indices, 1):
-        print(f"    {i}. {idx}시간 전 (점수: {avg_attention_scores[idx]:.4f})")
+        print(f"    {i}. {idx}번째 시점 (점수: {avg_attention_scores[idx]:.4f})")
 
 def main():
     """메인 실행 함수"""
     print("=" * 80)
-    print("제9장: LSTM 모델 학습 및 평가")
+    print("제9장: 기준선과 딥러닝 비교")
     print("=" * 80)
 
     # 1. 데이터 로드
@@ -381,12 +452,28 @@ def main():
     # Scaler 파라미터 로드 (역정규화용)
     scaler_params = np.load(OUTPUT_DIR + '9-1-scaler-params.npy', allow_pickle=True).item()
 
+    # 역정규화된 실제값
+    y_true = y_test * scaler_params['scale'] + scaler_params['center']
+
+    # 1-2. 학습하기 전에 기준선부터 세운다
+    print("\n[2단계] 단순 기준선 계산 (학습 없음)...")
+    baselines = compute_baselines(X_test, scaler_params)
+    baseline_metrics = {}
+    for name, pred in baselines.items():
+        m = compute_metrics(y_true, pred)
+        baseline_metrics[name] = m
+        print(f"  - {name:15s} RMSE {m['rmse']:8.1f} MW | MAE {m['mae']:8.1f} MW | MAPE {m['mape']:5.2f}%")
+
+    best_base = min(baseline_metrics, key=lambda k: baseline_metrics[k]['mae'])
+    print(f"  → 가장 나은 기준선: {best_base} (MAE {baseline_metrics[best_base]['mae']:.1f} MW)")
+    print("  → 딥러닝 모델은 이 값을 이겨야 한다")
+
     seq_length = X_train.shape[1]
     n_features = X_train.shape[2]
     pred_length = y_train.shape[1]
 
     # 2. 모델 생성
-    print("\n[2단계] 모델 생성 중...")
+    print("\n[3단계] 딥러닝 모델 생성 중...")
 
     # Import model creation functions
     lstm_model_module = load_lstm_model_module()
@@ -423,90 +510,86 @@ def main():
         metrics=['mae', 'mape']
     )
 
-    print("  ✓ 모든 모델 생성 완료")
+    print("  - 모델 3개 생성 완료")
 
     # 3. 모델 학습
-    print("\n[3단계] 모델 학습 중...")
+    print("\n[4단계] 모델 학습 중...")
 
     history_policy = train_model(policy_lstm, X_train, y_train, X_val, y_val,
-                                 "Policy-Aware LSTM")
+                                 "LSTM+Attention")
     history_baseline = train_model(baseline_lstm, X_train, y_train, X_val, y_val,
-                                   "Baseline LSTM")
+                                   "LSTM")
     history_gru = train_model(gru_model, X_train, y_train, X_val, y_val,
-                              "GRU Model")
+                              "GRU")
 
     # 4. 모델 평가
-    print("\n[4단계] 모델 평가 중...")
+    print("\n[5단계] 딥러닝 모델 평가...")
 
     metrics_policy, y_pred_policy = evaluate_model(
-        policy_lstm, X_test, y_test, scaler_params, "Policy-Aware LSTM"
+        policy_lstm, X_test, y_test, scaler_params, "LSTM+Attention"
     )
     metrics_baseline, y_pred_baseline = evaluate_model(
-        baseline_lstm, X_test, y_test, scaler_params, "Baseline LSTM"
+        baseline_lstm, X_test, y_test, scaler_params, "LSTM"
     )
     metrics_gru, y_pred_gru = evaluate_model(
-        gru_model, X_test, y_test, scaler_params, "GRU Model"
+        gru_model, X_test, y_test, scaler_params, "GRU"
     )
 
-    # 역정규화된 실제값
-    y_true = y_test * scaler_params['scale'] + scaler_params['center']
+    # 5. 전체 비교표
+    all_metrics = dict(baseline_metrics)
+    all_metrics['LSTM+Attention'] = metrics_policy
+    all_metrics['LSTM'] = metrics_baseline
+    all_metrics['GRU'] = metrics_gru
 
-    # 5. 정책 단계별 분석 (Policy-Aware LSTM)
-    print("\n[5단계] 정책 단계별 분석...")
-    phase_metrics = analyze_policy_phases(y_true, y_pred_policy)
+    base_mae = baseline_metrics[best_base]['mae']
 
-    # 6. 시각화
-    print("\n[6단계] 결과 시각화 중...")
+    print("\n" + "=" * 80)
+    print("전체 비교 (같은 테스트 구간, 같은 지표)")
+    print("=" * 80)
+    print(f"{'방법':<16}{'RMSE(MW)':>11}{'MAE(MW)':>11}{'MAPE(%)':>10}"
+          f"{'기준선 대비':>13}  판정")
+    print("-" * 80)
+    for name, m in all_metrics.items():
+        diff = (m['mae'] / base_mae - 1) * 100
+        verdict = "기준선을 이김" if m['mae'] < base_mae else "기준선을 못 이김"
+        if name == best_base:
+            verdict = "기준선(최고)"
+        print(f"{name:<16}{m['rmse']:>11.1f}{m['mae']:>11.1f}{m['mape']:>10.2f}"
+              f"{diff:>12.1f}%  {verdict}")
 
-    # 학습 곡선
+    winners = [n for n in ['LSTM+Attention', 'LSTM', 'GRU']
+               if all_metrics[n]['mae'] < base_mae]
+    print("-" * 80)
+    print(f"기준선({best_base}) MAE {base_mae:.1f} MW를 이긴 딥러닝 모델: "
+          f"{len(winners)}개 / 3개")
+    if winners:
+        print(f"  이긴 모델: {', '.join(winners)}")
+
+    # 6. 테스트 구간 3등분
+    print("\n[6단계] 구간별 오차 확인...")
+    best_dl = min(['LSTM+Attention', 'LSTM', 'GRU'], key=lambda n: all_metrics[n]['mae'])
+    y_pred_best = {'LSTM+Attention': y_pred_policy,
+                   'LSTM': y_pred_baseline,
+                   'GRU': y_pred_gru}[best_dl]
+    analyze_test_thirds(y_true, y_pred_best)
+
+    # 7. 시각화
+    print("\n[7단계] 결과 시각화 중...")
+
     visualize_training_results(
         [history_policy, history_baseline, history_gru],
-        ['Policy-Aware LSTM', 'Baseline LSTM', 'GRU Model']
+        ['LSTM+Attention', 'LSTM', 'GRU']
     )
-
-    # 예측 결과 (Policy-Aware LSTM)
-    visualize_predictions(y_true, y_pred_policy, "Policy-Aware LSTM")
-
-    # 어텐션 가중치 (Policy-Aware LSTM만)
+    visualize_predictions(y_true, y_pred_best, baselines, all_metrics, best_dl)
     visualize_attention_weights(policy_lstm, X_test)
 
-    # 7. 종합 평가 요약
-    print("\n" + "=" * 80)
-    print("모델 평가 요약")
-    print("=" * 80)
-
-    print("\n모델별 성능:")
-    print(f"\n1. Policy-Aware LSTM:")
-    print(f"   - Normalized MSE: {metrics_policy['normalized_mse']:.4f}")
-    print(f"   - MAE: {metrics_policy['mae']:.2f} MW")
-    print(f"   - MAPE: {metrics_policy['mape']:.2f}%")
-
-    print(f"\n2. Baseline LSTM:")
-    print(f"   - Normalized MSE: {metrics_baseline['normalized_mse']:.4f}")
-    print(f"   - MAE: {metrics_baseline['mae']:.2f} MW")
-    print(f"   - MAPE: {metrics_baseline['mape']:.2f}%")
-
-    print(f"\n3. GRU Model:")
-    print(f"   - Normalized MSE: {metrics_gru['normalized_mse']:.4f}")
-    print(f"   - MAE: {metrics_gru['mae']:.2f} MW")
-    print(f"   - MAPE: {metrics_gru['mape']:.2f}%")
-
-    print("\n정책 단계별 성능 (Policy-Aware LSTM):")
-    print(f"   - 정책 도입기: {phase_metrics['intro']:.2f} MW")
-    print(f"   - 정책 평가기: {phase_metrics['eval']:.2f} MW")
-    print(f"   - 정책 정착기: {phase_metrics['stable']:.2f} MW")
-
-    print("\n분석 결과:")
-    print("  ✓ Test MSE: 0.03~0.04 수준 (정규화된 데이터 기준)")
-    print("  ✓ Test MAE: 약 150 MW 내외 (평균 수요 대비 약 3% 오차)")
-    print("  ✓ Test MAPE: 3~5% 수준 (산업 표준 5% 이내의 우수한 정확도)")
-    print("  ✓ 정책 단계별 MAE: 정책 도입기 > 평가기 > 정착기 순으로 오차 감소")
-
     print("\n출력 파일:")
-    print(f"  - 학습된 모델 (메모리에만 저장, 파일 미저장)")
+    print("  - 9-3-learning-curves.png")
+    print("  - 9-3-baseline-vs-deep.png")
+    print("  - 9-3-attention.png")
 
     print("\n" + "=" * 80)
-    print("분석 완료!")
+    print("실행 완료")
     print("=" * 80)
 
 if __name__ == "__main__":

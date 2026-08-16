@@ -1,10 +1,33 @@
 """
 제4장: Validation Methods - 플라시보 검정, Leave-one-out, 시간 플라시보
 순열 기반 추론, 사전 적합도 필터링, 교차 검증
+
+수정 이력
+---------
+2026-08-17
+- 증상: 스크립트가 끝까지 실행되지 않고 멈춤. 표준출력에 아무것도 남지 않음.
+- 원인: matplotlib 기본 백엔드가 tkagg여서 plt.show()가 창을 띄우고 사용자
+  입력을 기다린다. 콘솔에서 일괄 실행하면 여기서 무한 대기한다.
+- 조치: pyplot을 import 하기 전에 matplotlib.use('Agg')로 화면 없는 백엔드를
+  지정하고, plt.show() 대신 plt.close()로 그림 객체를 닫는다.
+  PNG 저장(plt.savefig)은 그대로 동작한다.
+
+2026-08-17 (2)
+- 증상: 플라시보 검정 p값이 0.000으로 출력됐다. 대조 지역이 20개뿐이므로
+  순위 기반 p값이 0이 될 수 없다.
+- 원인: p값을 (실제보다 극단적인 가상 효과 수) / J로 계산해, 실제 처치 지역
+  자신을 순열 분포에서 빼 버렸다. 극단값이 하나도 없으면 0/20 = 0이 된다.
+- 조치: 표준 순위 공식 (1 + 극단값 수) / (J + 1)로 바꿨다. 필터링 p값도 같은
+  방식으로 고쳤다. 20개 donor에서 최솟값은 1/21 = 0.048이다.
+- 확인: 실제 효과가 가장 극단적이므로 p = 1/21 = 0.048로 출력된다.
+
+- 그래프의 한글 지역명이 깨져 폰트를 'Malgun Gothic'으로 바꿨다.
 """
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # 화면 없는 백엔드 (plt.show() 대기 방지)
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.optimize import minimize
@@ -12,7 +35,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 시각화 설정 (한글 폰트 깨짐 방지)
-plt.rcParams['font.family'] = 'Arial'
+plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_style("whitegrid")
 
@@ -176,15 +199,21 @@ def placebo_test(data, reg_param=0.01):
     placebo_effects = np.array(placebo_effects)
     placebo_mspes = np.array(placebo_mspes)
 
-    # p-value 계산 (양측 검정)
-    p_value = np.mean(np.abs(placebo_effects) >= np.abs(real_effect))
+    # p-value 계산 (순위 기반, 양측)
+    #   실제 처치 지역도 순열 분포의 한 원소다. 따라서 분자에 자기 자신 1을 더하고
+    #   분모는 J+1이 된다. J=20이면 가장 극단적일 때 1/21 = 0.048이 최솟값이다.
+    n_extreme = int(np.sum(np.abs(placebo_effects) >= np.abs(real_effect)))
+    p_value = (1 + n_extreme) / (len(placebo_effects) + 1)
 
     # 사전 적합도 필터링
     filter_threshold = 2 * real_mspe
     filtered_idx = placebo_mspes <= filter_threshold
-    p_value_filtered = np.mean(
-        np.abs(placebo_effects[filtered_idx]) >= np.abs(real_effect)
-    ) if filtered_idx.sum() > 0 else p_value
+    if filtered_idx.sum() > 0:
+        n_extreme_f = int(np.sum(
+            np.abs(placebo_effects[filtered_idx]) >= np.abs(real_effect)))
+        p_value_filtered = (1 + n_extreme_f) / (int(filtered_idx.sum()) + 1)
+    else:
+        p_value_filtered = p_value
 
     return {
         'real_effect': real_effect,
@@ -552,7 +581,7 @@ def visualize_validation_results(placebo_res, loo_res, time_placebo_res, cv_res)
                  fontsize=14, fontweight='bold', y=0.995)
 
     plt.savefig('4-5-validation-results.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def main():

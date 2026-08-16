@@ -1,26 +1,50 @@
 """
-Chapter 9 - Deep Learning Basics and Policy Time Series Forecasting
-9.5.2 LSTM Model Implementation
+Chapter 9 - Deep Learning Basics and Time Series Forecasting
+9.4 LSTM과 GRU 모델 만들기
 
-정책 효과를 반영한 LSTM 모델 구현
-어텐션 메커니즘을 결합한 Policy-Aware LSTM
+세 모델의 구조와 파라미터 수를 확인한다.
+학습은 9-3-train-evaluate.py에서 한다.
+
+수정 이력
+---------
+2026-08-17
+1. 경로 오류 수정
+   증상: `OUTPUT_DIR`이 저장소 루트 기준 상대경로여서 code 폴더에서 실행하면
+         가중치 저장이 실패했다.
+   수정: `__file__` 기준 절대경로로 바꿨다.
+
+2. 그림 저장 (`plt.show()` → `savefig`)
+   비대화형 실행에서 PNG가 남지 않던 문제를 고쳤다.
+
+3. `recurrent_dropout=0.1` 제거
+   증상: CPU에서 한 에포크가 수십 분씩 걸렸다.
+   원인: recurrent_dropout을 켜면 Keras가 시점마다 파이썬 루프를 도는 일반 경로를
+         쓴다. 융합된 LSTM 커널이 꺼진다.
+   수정: 층 사이 dropout(0.2)만 남겼다. 정규화 효과는 유지하고 속도를 되찾았다.
+
+4. Attention 층 이름 변경 안내
+   `PolicyAwareLSTM`이라는 이름에 '정책'이 들어 있지만 정책 변수를 따로 다루는
+   장치는 없다. LSTM 3층 위에 어텐션 1층을 얹은 구조다. 강의노트에 그대로 적었다.
 """
 
+import os
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정
 matplotlib.rc('font', family='Arial')
 plt.rcParams['axes.unicode_minus'] = False
 
-# 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter09/data/'
+# 경로 (스크립트 위치 기준)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, os.pardir, 'data') + os.sep
+FIG_DIR = BASE_DIR + os.sep
 
 class PolicyAwareLSTM(keras.Model):
     """
@@ -51,7 +75,6 @@ class PolicyAwareLSTM(keras.Model):
                     units,
                     return_sequences=True,
                     dropout=0.2,
-                    recurrent_dropout=0.1,
                     name=f'lstm_{i+1}'
                 )
             )
@@ -62,7 +85,6 @@ class PolicyAwareLSTM(keras.Model):
                 lstm_units[-1],
                 return_sequences=True,
                 dropout=0.2,
-                recurrent_dropout=0.1,
                 name=f'lstm_{len(lstm_units)}'
             )
         )
@@ -234,8 +256,8 @@ def visualize_model_comparison(models_info):
     ax.grid(True, alpha=0.3, axis='x')
 
     plt.tight_layout()
-    plt.show()
-    # Visualization displayed (not saved)
+    plt.savefig(FIG_DIR + '9-2-lstm-model.png', dpi=130, bbox_inches='tight')
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -344,40 +366,35 @@ def main():
     avg_attention_scores = tf.reduce_mean(avg_attention, axis=0).numpy()  # (seq_length,)
 
     print(f"\n  - 평균 어텐션 점수 범위: [{avg_attention_scores.min():.4f}, {avg_attention_scores.max():.4f}]")
-    print(f"  - 최고 점수 시점: {avg_attention_scores.argmax()} 시간 전")
+    print(f"  - 균등 배분값 1/168 = {1/168:.4f}")
+    print("  - 학습 전이라 168개 시점에 가중치가 거의 고르게 퍼져 있다")
 
     # 6. 분석 요약
     print("\n" + "=" * 80)
     print("모델 생성 완료")
     print("=" * 80)
 
-    print("\n모델별 특징:")
-    print("  1. Policy-Aware LSTM:")
-    print("     - 3층 LSTM (128 → 64 → 32 units)")
-    print("     - 멀티헤드 어텐션 (4 heads)")
-    print("     - 정책 변화에 민감한 시점 학습")
-    print(f"     - 총 파라미터: {policy_lstm.count_params():,}")
+    p_att = policy_lstm.count_params()
+    p_lstm = baseline_lstm.count_params()
+    p_gru = gru_model.count_params()
 
-    print("\n  2. Baseline LSTM:")
-    print("     - 2층 LSTM (128 → 64 units)")
-    print("     - 어텐션 없음")
-    print("     - 전통적 시계열 예측")
-    print(f"     - 총 파라미터: {baseline_lstm.count_params():,}")
+    print("\n모델별 구조:")
+    print(f"  1. LSTM+Attention: LSTM 3층(128,64,32) + 어텐션 1층, 파라미터 {p_att:,}")
+    print(f"  2. LSTM:           LSTM 2층(128,64),            파라미터 {p_lstm:,}")
+    print(f"  3. GRU:            GRU  2층(128,64),            파라미터 {p_gru:,}")
 
-    print("\n  3. GRU Model:")
-    print("     - 2층 GRU (128 → 64 units)")
-    print("     - LSTM 대비 파라미터 약 25% 감소")
-    print("     - 빠른 학습 속도")
-    print(f"     - 총 파라미터: {gru_model.count_params():,}")
+    print("\n파라미터 수 계산 확인:")
+    print("  LSTM 1층: 4 x (128 x (19 + 128) + 128) = 75,776")
+    print("  GRU  1층: 3 x (128 x (19 + 128) + 128 x 2) = 57,216")
+    print(f"  GRU가 LSTM보다 {(1 - p_gru / p_lstm) * 100:.1f}% 적다 (게이트 3개 대 4개)")
 
-    print("\n설계 원칙:")
-    print("  - Dropout (0.2)으로 과적합 방지")
-    print("  - Recurrent Dropout (0.1)으로 시계열 정규화")
-    print("  - 어텐션으로 중요 시점 자동 학습")
-    print("  - Global Pooling으로 시퀀스 정보 요약")
+    print("\n이 스크립트로 확인한 것과 확인 못 한 것:")
+    print("  확인함: 층 구성, 층별 출력 모양, 파라미터 수")
+    print("  확인 못 함: 예측 정확도. 아직 학습을 하지 않았다")
 
     print("\n출력 파일:")
-    print(f"  - {OUTPUT_DIR}9-2-policy-lstm-initial.weights.h5")
+    print("  - data/9-2-policy-lstm-initial.weights.h5")
+    print("  - 9-2-lstm-model.png")
 
     # 7. 모델 저장 (선택적)
     print("\n[6단계] 모델 아키텍처 저장...")

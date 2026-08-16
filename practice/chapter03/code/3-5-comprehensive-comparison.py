@@ -10,12 +10,30 @@ Chapter 3: PSM 방법론 종합 비교 (Comprehensive Comparison)
 
 저자: AI 기반 정책분석방법론
 날짜: 2025-11-18
+
+수정 이력
+---------
+2026-08-17
+1) 무엇이 틀렸나: 이 파일 안의 `local_balance_loss`가 3-3-deep-psm-pytorch.py와
+   같은 결함을 갖고 있었다. `bin_mask`로 구간을 자른 뒤 입력 공변량 X의 구간
+   평균을 비교했는데, X는 성향점수의 함수가 아니고 불리언 마스크는 미분되지
+   않는다. 그래서 이 항의 grad_fn이 None이고 λ_balance=5.0이 학습에 아무
+   영향을 주지 못했다. 표에 적힌 "LBC-Net" 결과는 균형 최적화를 하지 않은
+   신경망의 결과였다.
+2) 어떻게 고쳤나: 3-3과 같은 커널 가중 국소 균형 손실로 바꿨다.
+   w_ik = exp(-(ps_i - p_k)^2 / (2h^2))로 두면 국소 가중평균이 ps에 대해
+   미분되므로 균형 항이 실제로 학습된다.
+3) λ_balance를 5.0에서 1.0으로 낮췄다. 3-3에서와 같은 이유다. 균형 항이
+   작동하기 시작하면 5.0은 성향점수를 좁은 구간으로 눌러 보정을 깨뜨린다.
+4) 함께 고친 것: 결과 그림(3-5-comparison.png)을 저장한다.
+   ATT·편향·매칭 후 SMD·학습 시간 네 개 패널이다.
 """
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import time
 from pathlib import Path
 from sklearn.linear_model import LogisticRegression
@@ -93,20 +111,24 @@ class LBCNet(nn.Module):
     def forward(self, x):
         return self.network(x).squeeze()
 
-def local_balance_loss(ps, X, T, n_bins=10):
-    """Local Balance 패널티"""
-    ps_bins = torch.linspace(0, 1, n_bins + 1)
-    balance_loss = 0.0
-    for i in range(n_bins):
-        bin_mask = (ps >= ps_bins[i]) & (ps < ps_bins[i + 1])
-        if bin_mask.sum() > 1:
-            treated_mask = bin_mask & (T == 1)
-            control_mask = bin_mask & (T == 0)
-            if treated_mask.sum() > 0 and control_mask.sum() > 0:
-                treated_mean = X[treated_mask].mean(0)
-                control_mean = X[control_mask].mean(0)
-                balance_loss += ((treated_mean - control_mean) ** 2).sum()
-    return balance_loss / n_bins
+def local_balance_loss(ps, X, T, n_bins=10, bandwidth=0.10, eps=1e-6):
+    """Local Balance 패널티 (커널 가중, 미분 가능)
+
+    앵커점 p_k 주변의 처치군·대조군 공변량 가중평균이 같아야 한다는 조건.
+    가중치가 ps의 매끄러운 함수라 신경망 가중치에 대해 미분된다.
+    """
+    anchors = torch.linspace(0.05, 0.95, n_bins)
+    w = torch.exp(-((ps.unsqueeze(1) - anchors.unsqueeze(0)) ** 2)
+                  / (2 * bandwidth ** 2))
+    t = T.unsqueeze(1)
+    w_t, w_c = w * t, w * (1 - t)
+    mass_t, mass_c = w_t.sum(0), w_c.sum(0)
+    mean_t = (w_t.T @ X) / (mass_t.unsqueeze(1) + eps)
+    mean_c = (w_c.T @ X) / (mass_c.unsqueeze(1) + eps)
+    diff2 = ((mean_t - mean_c) ** 2).sum(1)
+    rho = torch.min(mass_t, mass_c)
+    rho = rho / (rho.sum() + eps)
+    return (rho * diff2).sum()
 
 def local_calibration_loss(ps, T, n_bins=10):
     """Local Calibration 패널티"""
@@ -120,7 +142,7 @@ def local_calibration_loss(ps, T, n_bins=10):
             calibration_loss += (ps_mean - actual_rate) ** 2
     return calibration_loss / n_bins
 
-def train_lbcnet(X, T, epochs=300, lr=0.0003, lambda_balance=5.0, lambda_calib=2.0):
+def train_lbcnet(X, T, epochs=300, lr=0.0003, lambda_balance=1.0, lambda_calib=2.0):
     """LBC-Net 학습 (전체 균형 손실 적용)"""
     input_dim = X.shape[1]
     model = LBCNet(input_dim, hidden_dim=128)
@@ -285,6 +307,52 @@ def main():
     # 가장 좋은 방법 출력
     best_idx = df['Bias (%)'].abs().idxmin()
     print(f"\n최소 편향 방법: {df.loc[best_idx, 'Method']} (편향: {df.loc[best_idx, 'Bias (%)']:.1f}%)")
+
+    balanced = df[df['Avg SMD'] < 0.1]['Method'].tolist()
+    print(f"매칭 후 평균 SMD가 0.1 미만인 방법: {', '.join(balanced) if balanced else '없음'}")
+
+    plot_comparison(df, true_att,
+                    Path(__file__).parent / '../data/3-5-comparison.png')
+
+
+def plot_comparison(df, true_att, out_path):
+    """방법별 ATT·SMD·시간 비교 그림"""
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.8))
+    xpos = np.arange(len(df))
+    names = df['Method'].tolist()
+
+    ax = axes[0]
+    ax.bar(xpos, df['ATT'], yerr=1.96 * df['SE'], capsize=5, color='#7fa9d9')
+    ax.axhline(true_att, color='red', linestyle='--',
+               label=f'True ATT = {true_att:.2f}')
+    ax.set_xticks(xpos); ax.set_xticklabels(names, rotation=15, ha='right')
+    ax.set_ylabel('Estimated ATT (95% CI)')
+    ax.set_title('(a) ATT estimate vs true value')
+    ax.legend(); ax.grid(axis='y', alpha=0.3)
+
+    ax = axes[1]
+    colors = ['#c0392b' if v >= 0.1 else '#2e8b57' for v in df['Avg SMD']]
+    ax.bar(xpos, df['Avg SMD'], color=colors)
+    ax.axhline(0.1, color='red', linestyle='--', label='SMD = 0.1')
+    ax.set_xticks(xpos); ax.set_xticklabels(names, rotation=15, ha='right')
+    ax.set_ylabel('Average |SMD| after matching')
+    ax.set_title('(b) Covariate balance')
+    ax.legend(); ax.grid(axis='y', alpha=0.3)
+
+    ax = axes[2]
+    ax.bar(xpos, df['Time'], color='#d6a300')
+    ax.set_yscale('log')
+    ax.set_xticks(xpos); ax.set_xticklabels(names, rotation=15, ha='right')
+    ax.set_ylabel('Seconds (log scale)')
+    ax.set_title('(c) Fitting time')
+    ax.grid(axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"\n결과 그림 저장: {out_path}")
+
 
 if __name__ == "__main__":
     main()

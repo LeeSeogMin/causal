@@ -1,8 +1,19 @@
 """
 제5장: Sharp RDD 추정 (국소 선형 회귀)
 회귀불연속설계의 기본 구현 - 기준점 근처 국소 선형 회귀로 처치효과 추정
+
+수정 이력
+---------
+2026-08-17
+1) 한글 폰트: `font.family`가 'DejaVu Sans'로 지정되어 있었다. DejaVu Sans에는
+   한글 글리프가 없어서 축 이름·범례·제목의 한글이 전부 빈 사각형으로 저장됐다
+   (실행 시 "Glyph ... missing from font(s) DejaVu Sans" 경고 다수).
+   설치된 한글 폰트를 찾아 지정하도록 고쳤다.
+2) 저장 경로 안내: savefig는 스크립트가 있는 폴더에 저장하는데 print 문은
+   'practice/chapter05/...'를 찍어 실제 위치와 달랐다. 실제 저장 경로를 찍도록 고쳤다.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -12,8 +23,12 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from matplotlib import font_manager as fm
 
-# 한글 폰트 설정 (플랫폼 독립적)
-plt.rcParams['font.family'] = 'DejaVu Sans'
+# 한글 폰트 설정: 설치된 한글 폰트를 순서대로 찾아 지정한다
+_installed = {f.name for f in fm.fontManager.ttflist}
+for _name in ['Malgun Gothic', 'AppleGothic', 'NanumGothic', 'Noto Sans CJK KR']:
+    if _name in _installed:
+        plt.rcParams['font.family'] = _name
+        break
 plt.rcParams['axes.unicode_minus'] = False
 
 # 랜덤 시드 설정
@@ -215,8 +230,9 @@ ax.legend(fontsize=9)
 ax.grid(alpha=0.3, axis='y')
 
 plt.tight_layout()
-plt.savefig('5-1-sharp-rdd-results.png', dpi=300, bbox_inches='tight')
-print("그래프 저장 완료: practice/chapter05/5-1-sharp-rdd-results.png")
+_out = os.path.join(base_path, '5-1-sharp-rdd-results.png')
+plt.savefig(_out, dpi=300, bbox_inches='tight')
+print(f"그래프 저장 완료: {_out}")
 
 # 6. 최종 요약
 print("\n" + "=" * 80)

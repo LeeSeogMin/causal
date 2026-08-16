@@ -5,31 +5,46 @@ Chapter 07 - Quantile Regression and Distributional Treatment Effects
 무상 대학교육 정책의 분포적 효과 종합 분석:
 - RIF 회귀를 통한 Unconditional QTE 추정
 - Quantile Regression Forest를 통한 CQTE 추정 후 평균화
+- LightGBM 분위 회귀를 통한 CQTE 추정 후 평균화
 - Distributional DID를 통한 QTT 추정
 - 불평등 지표 변화 분석 (Gini 계수, 90-10 비율)
-- 동태적 효과 분석 (Event Study)
 - 비수혜자 파급효과 분석
 
-2023년 소득 하위 50% 가구 대상 무상 대학교육 정책 자연실험
+소득 하위 50% 가구 대상 무상 대학교육 정책 (가상 데이터)
 처치군(정책 시행 지역) vs 대조군(인접 지역)
-정책 시행 전후 3년간 패널 데이터
+정책 시행 전후 패널 데이터
+
+수정 이력 (2026-08-17)
+---------------------
+1. visualize_results()가 그림을 그리기만 하고 savefig도 show도 하지 않아
+   PNG 파일이 하나도 생기지 않았다.
+   -> Agg 백엔드를 지정하고 7-5-education-policy-case.png로 저장한다.
+2. analyze_dynamic_effects()가 effect_scale = {1: 0.37, 2: 0.74, 3: 1.0}을
+   직접 넣어 처치군 소득을 그만큼 올린 뒤, 그 결과를 "1년차 37% -> 3년차 100%"
+   라는 발견처럼 출력했다. 넣은 값을 그대로 다시 읽는 순환 구조다.
+   -> 함수와 출력, 해당 그림 패널을 모두 삭제했다. 그 자리에는 실제 데이터의
+      처치군 사전/사후 소득 분포를 그린다.
+3. analyze_spillover_effects()의 Gini 변화가 처치 지역의 사전-사후 차이만
+   계산하면서 이름은 '파급효과'였다. 대조 지역 변화를 빼지 않아 시간 추세가
+   섞인다.
+   -> 대조 지역의 변화를 뺀 이중차분 형태로 고쳤다.
+4. 불평등 지표 그림에서 Gini(0.12)와 평균 소득(5214)을 같은 축에 그려 Gini
+   막대가 보이지 않았다.
+   -> 정책 전을 100으로 놓은 지수로 바꿔 네 지표를 나란히 비교한다.
 """
 
+import os
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
-from scipy.interpolate import interp1d
 import warnings
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정
 matplotlib.rc('font', family='Arial')
 plt.rcParams['axes.unicode_minus'] = False
-
-# 결과 저장 경로
-OUTPUT_DIR = 'practice/chapter07/data/'
 
 def generate_education_policy_data(n_total=10000, treated_region=True, time_period='post'):
     """
@@ -390,56 +405,21 @@ def analyze_spillover_effects(df_panel):
     ate_did = (df_treat_post['income'].mean() - df_treat_pre['income'].mean()) - \
               (df_control_post['income'].mean() - df_control_pre['income'].mean())
 
-    # Gini 계수 변화
-    gini_pre = compute_inequality_measures(df_treat_pre, df_treat_pre, eligible_only=False)['gini_pre']
-    gini_post = compute_inequality_measures(df_treat_post, df_treat_post, eligible_only=False)['gini_post']
+    # Gini 계수 변화도 이중차분으로 계산한다 (대조 지역의 변화를 뺀다)
+    def gini(x):
+        sorted_x = np.sort(x)
+        n = len(x)
+        return (2 * np.sum(np.arange(1, n + 1) * sorted_x)) / (n * np.sum(sorted_x)) - (n + 1) / n
+
+    gini_did = (gini(df_treat_post['income'].values) - gini(df_treat_pre['income'].values)) - \
+               (gini(df_control_post['income'].values) - gini(df_control_pre['income'].values))
 
     return {
         'mean_income_change': ate_did,
-        'gini_change': gini_post - gini_pre
+        'gini_change': gini_did
     }
 
-def analyze_dynamic_effects(n_per_period=10000):
-    """동태적 효과 분석 (Event Study)"""
-    # 정책 시행 1년, 2년, 3년 후 효과
-    results = []
-
-    for year in [1, 2, 3]:
-        # 연도별로 다른 효과 크기 반영
-        np.random.seed(42 + year * 100)
-
-        # 데이터 생성 (효과 크기 조정)
-        df_treat = generate_education_policy_data(n_per_period, treated_region=True, time_period='post')
-        df_control = generate_education_policy_data(n_per_period, treated_region=False, time_period='post')
-
-        # 연도별 효과 크기 점진적 증가 (1년: 37%, 2년: 74%, 3년: 100%)
-        effect_scale = {1: 0.37, 2: 0.74, 3: 1.0}[year]
-
-        # 처치군의 소득을 연도에 맞게 상향 조정
-        # 3년차 full effect를 기준으로, 초기 연도는 일부 효과만 실현
-        # effect_scale만큼만 정책 효과가 반영됨
-        # 방법: 대조군 소득에서 시작 → 정책 효과를 점진적으로 추가
-        median_control_income = df_control[df_control['eligible'] == 1]['income'].median()
-        full_effect = 1000  # 3년차 완전 효과 (약 1000만원 증가)
-
-        # 처치군 소득 = 대조군 기준 + (효과 * scale)
-        df_treat.loc[df_treat['policy'] == 1, 'income'] = \
-            df_treat.loc[df_treat['policy'] == 1, 'income'] * 0.8 + median_control_income * 0.2 + full_effect * effect_scale
-
-        # 중위소득 효과 계산
-        median_treat = df_treat[df_treat['eligible'] == 1]['income'].median()
-        median_control = df_control[df_control['eligible'] == 1]['income'].median()
-        median_effect = median_treat - median_control
-
-        results.append({
-            'year': year,
-            'median_effect': median_effect,
-            'percent_of_final': effect_scale * 100
-        })
-
-    return pd.DataFrame(results)
-
-def visualize_results(df_qte, df_inequality, df_dynamic, df_spillover):
+def visualize_results(df_qte, df_inequality, df_panel, df_spillover):
     """결과 시각화"""
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
@@ -447,6 +427,7 @@ def visualize_results(df_qte, df_inequality, df_dynamic, df_spillover):
     ax1 = axes[0, 0]
     ax1.plot(df_qte['quantile'], df_qte['qte_rif'], 'o-', label='RIF Regression', linewidth=2, markersize=6)
     ax1.plot(df_qte['quantile'], df_qte['qte_qrf'], 's-', label='Quantile RF', linewidth=2, markersize=6)
+    ax1.plot(df_qte['quantile'], df_qte['qte_lgbm'], 'v-', label='LightGBM', linewidth=2, markersize=6)
     ax1.plot(df_qte['quantile'], df_qte['qtt_did'], '^-', label='Distributional DID', linewidth=2, markersize=6)
     ax1.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
     ax1.set_xlabel('Quantile (tau)', fontsize=11)
@@ -455,66 +436,69 @@ def visualize_results(df_qte, df_inequality, df_dynamic, df_spillover):
     ax1.legend(loc='upper right', fontsize=10)
     ax1.grid(True, alpha=0.3)
 
-    # (2) 불평등 지표 변화
+    # (2) 불평등 지표 변화 (정책 전 = 100 지수)
     ax2 = axes[0, 1]
-    categories = ['Gini Coefficient', '90-10 Ratio', 'College Rate', 'Mean Income']
-    pre_values = [
-        df_inequality['gini_pre'],
-        df_inequality['ratio_90_10_pre'],
-        df_inequality['college_rate_pre'] * 100,
-        df_inequality['mean_income_pre'] / 100
-    ]
-    post_values = [
-        df_inequality['gini_post'],
-        df_inequality['ratio_90_10_post'],
-        df_inequality['college_rate_post'] * 100,
-        df_inequality['mean_income_post'] / 100
+    categories = ['Gini', '90-10 Ratio', 'College Rate', 'Mean Income']
+    index_values = [
+        df_inequality['gini_post'] / df_inequality['gini_pre'] * 100,
+        df_inequality['ratio_90_10_post'] / df_inequality['ratio_90_10_pre'] * 100,
+        df_inequality['college_rate_post'] / df_inequality['college_rate_pre'] * 100,
+        df_inequality['mean_income_post'] / df_inequality['mean_income_pre'] * 100
     ]
     x = np.arange(len(categories))
-    width = 0.35
-    ax2.bar(x - width/2, pre_values, width, label='Pre-Policy', alpha=0.8)
-    ax2.bar(x + width/2, post_values, width, label='Post-Policy', alpha=0.8)
+    ax2.bar(x, index_values, 0.55, color='gray', edgecolor='black')
+    ax2.axhline(100, color='black', linestyle='--', linewidth=1.5, label='Pre-Policy = 100')
+    for xi, v in zip(x, index_values):
+        ax2.text(xi, v + 2, f'{v:.0f}', ha='center', fontsize=10)
     ax2.set_xticks(x)
-    ax2.set_xticklabels(categories, rotation=15, ha='right', fontsize=9)
-    ax2.set_ylabel('Value (standardized)', fontsize=11)
-    ax2.set_title('(b) Inequality Measures Change', fontsize=12, fontweight='bold')
+    ax2.set_xticklabels(categories, fontsize=10)
+    ax2.set_ylabel('Index (Pre-Policy = 100)', fontsize=11)
+    ax2.set_title('(b) Inequality Measures, Beneficiary Group', fontsize=12, fontweight='bold')
     ax2.legend(loc='upper left', fontsize=10)
     ax2.grid(True, alpha=0.3, axis='y')
 
-    # (3) 동태적 효과 (Event Study)
+    # (3) 수혜 집단의 소득 분포 변화 (실제 데이터)
     ax3 = axes[1, 0]
-    ax3.plot(df_dynamic['year'], df_dynamic['median_effect'], 'o-',
-             linewidth=2.5, markersize=8, color='darkgreen')
-    ax3.axhline(y=870, color='red', linestyle='--', alpha=0.7, label='Final Effect (Year 3)')
-    for i, row in df_dynamic.iterrows():
-        ax3.text(row['year'], row['median_effect'] + 30,
-                f"{row['percent_of_final']:.0f}%",
-                ha='center', fontsize=9)
-    ax3.set_xlabel('Years After Policy', fontsize=11)
-    ax3.set_ylabel('Median Income Effect (10,000 KRW)', fontsize=11)
-    ax3.set_title('(c) Dynamic Treatment Effects (Event Study)', fontsize=12, fontweight='bold')
-    ax3.set_xticks([1, 2, 3])
-    ax3.legend(loc='lower right', fontsize=10)
+    pre = df_panel[(df_panel['region'] == 1) & (df_panel['period'] == 0) &
+                   (df_panel['eligible'] == 1)]['income']
+    post = df_panel[(df_panel['region'] == 1) & (df_panel['period'] == 1) &
+                    (df_panel['eligible'] == 1)]['income']
+    bins = np.linspace(min(pre.min(), post.min()), max(pre.quantile(0.99), post.quantile(0.99)), 40)
+    ax3.hist(pre, bins=bins, alpha=1.0, label='Pre-Policy', color='white',
+             edgecolor='black', linewidth=1.2, density=True)
+    ax3.hist(post, bins=bins, alpha=0.55, label='Post-Policy', color='gray',
+             edgecolor='black', linewidth=0.8, density=True)
+    ax3.set_xlabel('Annual Income (10,000 KRW)', fontsize=11)
+    ax3.set_ylabel('Density', fontsize=11)
+    ax3.set_title('(c) Income Distribution, Beneficiary Group', fontsize=12, fontweight='bold')
+    ax3.legend(loc='upper right', fontsize=10)
     ax3.grid(True, alpha=0.3)
 
-    # (4) 역U자형 패턴 강조
+    # (4) RIF 회귀 결과와 95% 신뢰구간
     ax4 = axes[1, 1]
-    # RIF 회귀 결과만 사용
     quantiles = df_qte['quantile'].values
     effects = df_qte['qte_rif'].values
-    ax4.plot(quantiles, effects, 'o-', linewidth=2.5, markersize=8, color='purple')
-    ax4.fill_between(quantiles, 0, effects, alpha=0.3, color='purple')
-    # 최대/최소 지점 표시
-    max_idx = np.argmax(effects)
-    ax4.plot(quantiles[max_idx], effects[max_idx], 'r*', markersize=15, label=f'Max: tau={quantiles[max_idx]:.2f}, {effects[max_idx]:.0f}')
+    ses = df_qte['se_rif'].values
+    ax4.plot(quantiles, effects, 'o-', linewidth=2.5, markersize=8, color='black')
+    ax4.fill_between(quantiles, effects - 1.96 * ses, effects + 1.96 * ses,
+                     alpha=0.3, color='gray')
+    max_idx = int(np.argmax(effects))
+    ax4.plot(quantiles[max_idx], effects[max_idx], 'k*', markersize=16,
+             label=f'Max: tau={quantiles[max_idx]:.2f}, {effects[max_idx]:.0f}')
     ax4.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
     ax4.set_xlabel('Income Quantile (tau)', fontsize=11)
-    ax4.set_ylabel('Treatment Effect (10,000 KRW)', fontsize=11)
-    ax4.set_title('(d) Inverse-U Pattern (RIF Regression)', fontsize=12, fontweight='bold')
-    ax4.legend(loc='upper right', fontsize=10)
+    ax4.set_ylabel('UQPE (10,000 KRW)', fontsize=11)
+    ax4.set_title('(d) RIF Regression with 95% CI', fontsize=12, fontweight='bold')
+    ax4.legend(loc='lower right', fontsize=10)
     ax4.grid(True, alpha=0.3)
 
     plt.tight_layout()
+
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    output_path = os.path.join(base_path, '7-5-education-policy-case.png')
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f"그래프 저장 완료: {output_path}")
 
 def main():
     """메인 분석 실행"""
@@ -576,16 +560,15 @@ def main():
     print("\n[4단계] 비수혜자 파급효과 분석 중...")
     spillover_results = analyze_spillover_effects(df_panel)
 
-    # 5. 동태적 효과
-    print("\n[5단계] 동태적 효과 분석 중...")
-    df_dynamic = analyze_dynamic_effects()
-
-    # 6. 결과 출력
+    # 5. 결과 출력
     print("\n" + "=" * 80)
     print("분석 결과")
     print("=" * 80)
 
     print("\n[분위별 처치효과 (연소득, 만원)]")
+    print("주의: RIF는 UQPE(수혜 비율 1 단위 변화에 대한 무조건부 분위수 반응),")
+    print("      QRF/LightGBM은 조건부 분위수 차이의 평균, DID는 QTT다.")
+    print("      같은 열에 놓았다고 같은 양을 재는 것이 아니다.")
     print("-" * 90)
     print(f"{'분위수':>8} {'RIF':>12} {'QRF':>12} {'LightGBM':>12} {'DID':>12}")
     print("-" * 90)
@@ -597,7 +580,7 @@ def main():
         did = row['qtt_did']
         print(f"{tau:>8.2f} {rif:>12.0f} {qrf:>12.0f} {lgbm:>12.0f} {did:>12.0f}")
 
-    print("\n[불평등 지표 변화 (정책 시행 3년 후)]")
+    print("\n[불평등 지표 변화 (수혜 집단, 정책 전 -> 정책 후)]")
     print("-" * 80)
     print(f"지표                  정책 전       정책 후       변화         변화율")
     print("-" * 80)
@@ -606,21 +589,14 @@ def main():
     print(f"대학진학률          {inequality_results['college_rate_pre']*100:>7.1f}%    {inequality_results['college_rate_post']*100:>7.1f}%    {inequality_results['college_rate_change']*100:>7.1f}%p   {inequality_results['college_rate_change']/inequality_results['college_rate_pre']*100:>7.1f}%")
     print(f"평균 소득 (만원)    {inequality_results['mean_income_pre']:>8.0f}    {inequality_results['mean_income_post']:>8.0f}    {inequality_results['mean_income_change']:>8.0f}    {inequality_results['mean_income_change']/inequality_results['mean_income_pre']*100:>7.1f}%")
 
-    print("\n[비수혜자 파급효과]")
+    print("\n[비수혜자(상위 50% 가구) 파급효과, 이중차분]")
     print("-" * 80)
     print(f"평균 소득 변화:     {spillover_results['mean_income_change']:>8.0f} 만원")
     print(f"Gini 계수 변화:     {spillover_results['gini_change']:>8.3f}")
 
-    print("\n[동태적 효과 (Event Study)]")
-    print("-" * 80)
-    print(f"{'연도':>6} {'중위소득 효과':>15} {'최종효과 대비':>15}")
-    print("-" * 80)
-    for _, row in df_dynamic.iterrows():
-        print(f"{row['year']:>6.0f} {row['median_effect']:>15.0f} {row['percent_of_final']:>14.0f}%")
-
-    # 7. 시각화
+    # 6. 시각화
     print("\n[6단계] 결과 시각화 중...")
-    visualize_results(df_qte, inequality_results, df_dynamic, spillover_results)
+    visualize_results(df_qte, inequality_results, df_panel, spillover_results)
 
     print("\n" + "=" * 80)
     print("분석 완료!")

@@ -1,15 +1,32 @@
 """
-Chapter 11 - Graph Neural Networks and Policy Network Analysis
-11.1.1 Government Ministry Collaboration Network
+Chapter 11 - 그래프 신경망과 조직 네트워크 분석
+11.1 정부 부처 협업 네트워크 만들기
 
 한국 정부 18개 부처 간 협업 네트워크 생성 및 기본 속성 분석
+
+수정 이력
+---------
+2026-08-17
+1. 경로 오류: OUTPUT_DIR='practice/chapter11/data/', 저장 경로 'diagrams/...' 가
+   프로젝트 루트를 기준으로 쓰여 있어, code 폴더에서 실행하면
+   FileNotFoundError로 죽고 code 폴더 안에 빈 practice/·result/ 폴더가 생겼다.
+   → 모든 경로를 __file__ 기준 절대경로로 바꿨다.
+2. 결과 그림을 diagrams/(강의노트 개념도 폴더)에 저장하던 것을
+   code 폴더로 옮겼다. 개념도와 실습 산출물을 섞지 않는다.
+3. plt.show()가 창을 띄워 배치 실행이 멈췄다. Agg 백엔드로 바꾸고 close()로 교체.
+4. 마지막 '분석 해석' 출력이 밀도 0.072 / 평균차수 2.44 / 클러스터링 0.122 /
+   강연결 성분 16으로 하드코딩되어 있었는데, 실제 계산값은
+   0.095 / 3.222 / 0.361 / 9였다. 계산 결과를 그대로 쓰도록 고쳤다.
+5. result/ 폴더 중복 저장을 없앴다.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import networkx as nx
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -19,14 +36,10 @@ plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 10
 
-# 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter11/data/'
-RESULT_DIR = 'result/'
-
-# 디렉토리 생성
-import os
+# 경로: 이 파일 위치를 기준으로 잡는다 (어느 폴더에서 실행해도 같게 동작)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, '..', 'data') + os.sep
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(RESULT_DIR, exist_ok=True)
 
 def create_government_network():
     """
@@ -248,9 +261,10 @@ def visualize_network(G, title='정부 부처 협업 네트워크'):
 
     plt.axis('off')
     plt.tight_layout()
-    plt.savefig("diagrams/11-government-network.png", dpi=300, bbox_inches="tight",
+    plt.savefig(os.path.join(BASE_DIR, '11-government-network.png'),
+                dpi=150, bbox_inches="tight",
                 facecolor='white', edgecolor='none')
-    plt.show()
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -296,11 +310,7 @@ def main():
     df_edges = pd.DataFrame(edge_data)
     df_edges.to_csv(OUTPUT_DIR + '11-government-network-edges.csv',
                     index=False, encoding='utf-8-sig')
-    df_edges.to_csv(RESULT_DIR + '11-government-network-edges.csv',
-                    index=False, encoding='utf-8-sig')
-    print(f"  - 엣지 데이터 저장:")
-    print(f"    {OUTPUT_DIR}11-government-network-edges.csv")
-    print(f"    {RESULT_DIR}11-government-network-edges.csv")
+    print(f"  - 엣지 데이터 저장: 11-government-network-edges.csv")
 
     # 노드 리스트 저장
     node_data = []
@@ -313,41 +323,46 @@ def main():
         })
 
     df_nodes = pd.DataFrame(node_data)
+    df_nodes = df_nodes.sort_values('degree', ascending=False)
     df_nodes.to_csv(OUTPUT_DIR + '11-government-network-nodes.csv',
                    index=False, encoding='utf-8-sig')
-    df_nodes.to_csv(RESULT_DIR + '11-government-network-nodes.csv',
-                   index=False, encoding='utf-8-sig')
-    print(f"  - 노드 데이터 저장:")
-    print(f"    {OUTPUT_DIR}11-government-network-nodes.csv")
-    print(f"    {RESULT_DIR}11-government-network-nodes.csv")
+    print(f"  - 노드 데이터 저장: 11-government-network-nodes.csv")
+
+    print("\n[5단계] 부처별 연결도 (총 차수 상위 8개)")
+    print(f"  {'부처':<20}{'총차수':>6}{'내향':>6}{'외향':>6}")
+    for _, r in df_nodes.head(8).iterrows():
+        print(f"  {r['ministry']:<20}{r['degree']:>6}{r['in_degree']:>6}{r['out_degree']:>6}")
 
     # 5. 분석 요약
     print("\n" + "=" * 80)
     print("네트워크 분석 완료")
     print("=" * 80)
 
+    d = network_props['basic_stats']['density']
+    k = network_props['basic_stats']['avg_degree']
+    cc = network_props['structure']['clustering_coefficient']
+    nc = network_props['connectivity']['n_components']
+    n = network_props['basic_stats']['nodes']
+    m = network_props['basic_stats']['edges']
+
     print("\n주요 분석 결과:")
-    print(f"  - 네트워크 밀도: {network_props['basic_stats']['density']:.3f}")
-    print(f"  - 평균 차수: {network_props['basic_stats']['avg_degree']:.2f}")
-    print(f"  - 클러스터링 계수: {network_props['structure']['clustering_coefficient']:.3f}")
-    print(f"  - 강연결 성분 수: {network_props['connectivity']['n_components']}")
+    print(f"  - 네트워크 밀도: {d:.3f}  (= {m} / ({n}x{n-1}))")
+    print(f"  - 평균 차수: {k:.2f}")
+    print(f"  - 클러스터링 계수: {cc:.3f}")
+    print(f"  - 강연결 성분 수: {nc}")
 
     print("\n분석 해석:")
-    print("  1. 밀도 0.072는 부처 간 협업이 매우 선택적이고 전략적으로")
-    print("     이루어지고 있음을 나타냄")
-    print("  2. 평균 차수 2.44는 각 부처가 평균 2-3개 부처와 협력함을 의미")
-    print("  3. 클러스터링 계수 0.122는 정책 영역별로 소규모 그룹을 형성하여")
-    print("     협업하는 패턴을 보여줌")
-    print("  4. 강연결 성분 16개는 대부분의 부처가 양방향 협업 관계를 맺지")
-    print("     않고 있음을 의미함")
+    print(f"  1. 밀도 {d:.3f}은 가능한 연결 중 {d*100:.1f}%만 실제로 있다는 뜻이다.")
+    print(f"     부처는 아무 부처와나 협업하지 않고 상대를 골라서 맺는다.")
+    print(f"  2. 평균 차수 {k:.2f}는 부처 하나가 평균 {k:.0f}개 부처와 연결됨을 뜻한다.")
+    print(f"  3. 클러스터링 계수 {cc:.3f}은 '내 협업 상대끼리도 협업하는' 비율이다.")
+    print(f"     밀도 {d:.3f}보다 {cc/d:.1f}배 크므로 정책 영역별 삼각 구조가 있다.")
+    print(f"  4. 강연결 성분 {nc}개는 서로 오갈 수 있는 부처 묶음이 {nc}덩어리라는 뜻이다.")
 
     print("\n출력 파일:")
-    print(f"  - {OUTPUT_DIR}11-government-network.png")
-    print(f"  - {OUTPUT_DIR}11-government-network-edges.csv")
-    print(f"  - {OUTPUT_DIR}11-government-network-nodes.csv")
-    print(f"  - {RESULT_DIR}11-government-network.png (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-government-network-edges.csv (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-government-network-nodes.csv (결과 폴더)")
+    print("  - 11-government-network.png")
+    print("  - ../data/11-government-network-edges.csv")
+    print("  - ../data/11-government-network-nodes.csv")
 
     return gov_network
 

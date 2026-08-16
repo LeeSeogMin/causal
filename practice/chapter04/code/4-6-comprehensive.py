@@ -1,10 +1,39 @@
 """
 제4장: 종합 구현 - DID, SCM, SDID 비교 분석 파이프라인
 전체 워크플로우: 데이터 준비 → 방법론별 추정 → 검증 → 시각화 → 보고서
+
+수정 이력
+---------
+2026-08-17
+- 증상: 스크립트가 끝까지 실행되지 않고 멈춤. 표준출력에 아무것도 남지 않음.
+- 원인: matplotlib 기본 백엔드가 tkagg여서 plt.show()가 창을 띄우고 사용자
+  입력을 기다린다. 콘솔에서 일괄 실행하면 여기서 무한 대기한다.
+- 조치: pyplot을 import 하기 전에 matplotlib.use('Agg')로 화면 없는 백엔드를
+  지정하고, plt.show() 대신 plt.close()로 그림 객체를 닫는다.
+  PNG 저장(plt.savefig)은 그대로 동작한다.
+
+2026-08-17 (2)
+- 증상 1: SCM의 95% 신뢰구간이 [-0.90, 0.77]로 나와 추정값 -3.17을 포함하지
+  않는데도 p값은 0.000으로 유의하다고 출력됐다.
+- 원인 1: 신뢰구간을 플라시보 효과 분포의 2.5/97.5 백분위수로 잡았다. 가상 처치
+  효과는 0 근처에 몰리므로 이 구간은 추정값과 무관한 위치에 놓인다.
+- 조치 1: 추정값을 중심에 두고 플라시보 분포의 표준편차로 폭을 잡는다.
+
+- 증상 2: 순열 p값이 0.000으로 나왔다.
+- 원인 2: 실제 처치 지역을 순열 분포에서 제외해 분모를 J로만 잡았다.
+- 조치 2: (1 + 극단값 수) / (J + 1) 순위 공식으로 바꿨다.
+
+- 증상 3: 절대값이 가장 큰 DID(-3.63)에 "가장 보수적"이라는 설명이 붙었다.
+- 원인 3: 계산 없이 고정 문자열을 붙였다.
+- 조치 3: 설명을 지우고 추정값만 출력한다.
+
+- 그래프의 한글 지역명이 깨져 폰트를 'Malgun Gothic'으로 바꿨다.
 """
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # 화면 없는 백엔드 (plt.show() 대기 방지)
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.optimize import minimize
@@ -13,7 +42,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 시각화 설정
-plt.rcParams['font.family'] = 'Arial'
+plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_style("whitegrid")
 
@@ -271,11 +300,15 @@ def estimate_scm(data, reg_param=0.01):
     se = np.std(placebo_effects)
 
     # p-value
-    p_value = np.mean(np.abs(placebo_effects) >= np.abs(effect))
+    n_extreme = int(np.sum(np.abs(placebo_effects) >= np.abs(effect)))
+    p_value = (1 + n_extreme) / (len(placebo_effects) + 1)
 
     # 95% CI (플라시보 분포 기반)
-    ci_lower = np.percentile(placebo_effects, 2.5)
-    ci_upper = np.percentile(placebo_effects, 97.5)
+    # 신뢰구간은 추정값을 중심에 놓고 플라시보 분포의 산포로 폭을 잡는다.
+    # 플라시보 효과 자체의 백분위수를 그대로 쓰면 추정값을 포함하지 않는 구간이
+    # 나온다(가상 처치 효과는 0 근처에 몰려 있기 때문이다).
+    ci_lower = effect - 1.96 * se
+    ci_upper = effect + 1.96 * se
 
     # Herfindahl Index
     hhi = np.sum(w**2)
@@ -566,7 +599,7 @@ def visualize_comprehensive_results(data, did_res, scm_res, sdid_res):
                  fontsize=14, fontweight='bold', y=0.995)
 
     plt.savefig('4-6-comprehensive-results.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def main():
@@ -643,7 +676,7 @@ def main():
 
     print("\n1. 방법론 간 일관성:")
     print(f"   - 세 방법 모두 통계적으로 유의한 부정적 효과 발견")
-    print(f"   - DID: {did_res['effect']:.2f} (가장 보수적)")
+    print(f"   - DID: {did_res['effect']:.2f}")
     print(f"   - SCM: {scm_res['effect']:.2f} (가장 큰 효과)")
     print(f"   - SDID: {sdid_res['effect']:.2f} (중간값, 가장 작은 SE)")
 

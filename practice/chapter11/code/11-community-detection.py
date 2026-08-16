@@ -1,16 +1,28 @@
 """
-Chapter 11 - Graph Neural Networks and Policy Network Analysis
-11.3.2 Louvain Algorithm and Policy Coalition Identification
+Chapter 11 - 그래프 신경망과 조직 네트워크 분석
+11.3 커뮤니티 탐지
 
-Louvain 알고리즘을 활용한 정책 연합 탐지
+모듈러리티를 최대화해 협업이 몰려 있는 부처 묶음(정책 연합)을 찾는다.
+
+수정 이력
+---------
+2026-08-17
+1. 경로 오류: 프로젝트 루트 기준 상대경로여서 code 폴더에서 실행하면
+   입력 CSV를 못 찾고 안내문만 찍고 끝났다. → __file__ 기준 절대경로로 교체.
+2. plt.show() 때문에 배치 실행이 멈췄다. → Agg 백엔드 + close().
+3. 그림 저장 위치를 diagrams/(개념도 폴더)에서 code 폴더로 옮겼다.
+4. result/ 폴더 중복 저장 삭제.
+5. 무작위 배치(spring_layout)의 seed는 이미 고정되어 있었다. 그대로 둔다.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import networkx as nx
 from networkx.algorithms import community
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -20,14 +32,9 @@ plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 10
 
-# 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter11/data/'
-RESULT_DIR = 'result/'
-
-# 디렉토리 생성
-import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, '..', 'data') + os.sep
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(RESULT_DIR, exist_ok=True)
 
 def load_government_network():
     """저장된 네트워크 데이터 로드"""
@@ -153,8 +160,9 @@ def visualize_communities(G, communities_list, title='정책 연합 커뮤니티
     plt.title(title, fontsize=14, fontweight='bold')
     plt.axis('off')
     plt.tight_layout()
-    plt.savefig('diagrams/11-community-detection.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(BASE_DIR, '11-community-detection.png'),
+                dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -200,6 +208,21 @@ def main():
         print(f"  내부 연결 밀도: {info['internal_density']:.3f}")
         print(f"  평균 협업 강도: {info['avg_weight']:.3f}")
 
+    # 3-1. 커뮤니티 안쪽 연결과 바깥쪽 연결
+    node2comm = {}
+    for info in community_info:
+        for m in info['members']:
+            node2comm[m] = info['community_id']
+    inside = sum(1 for u, v in G.edges() if node2comm[u] == node2comm[v])
+    outside = G.number_of_edges() - inside
+    print("\n[3-1단계] 커뮤니티 안 연결과 커뮤니티 사이 연결")
+    print(f"  커뮤니티 안쪽 연결: {inside}개 ({inside/G.number_of_edges()*100:.1f}%)")
+    print(f"  커뮤니티 사이 연결: {outside}개 ({outside/G.number_of_edges()*100:.1f}%)")
+    print("  커뮤니티 사이를 잇는 연결 목록:")
+    for u, v in G.edges():
+        if node2comm[u] != node2comm[v]:
+            print(f"    {u}(C{node2comm[u]}) - {v}(C{node2comm[v]})  가중치 {G[u][v]['weight']}")
+
     # 4. 데이터 저장
     print("\n[4단계] 커뮤니티 데이터 저장 중...")
 
@@ -216,10 +239,7 @@ def main():
     df_communities = pd.DataFrame(comm_data)
     df_communities.to_csv(OUTPUT_DIR + '11-community-assignments.csv',
                          index=False, encoding='utf-8-sig')
-    df_communities.to_csv(RESULT_DIR + '11-community-assignments.csv',
-                         index=False, encoding='utf-8-sig')
-    print(f"  - {OUTPUT_DIR}11-community-assignments.csv")
-    print(f"  - {RESULT_DIR}11-community-assignments.csv")
+    print("  - ../data/11-community-assignments.csv")
 
     # 커뮤니티 통계 저장
     comm_stats = []
@@ -236,10 +256,7 @@ def main():
     df_stats = pd.DataFrame(comm_stats)
     df_stats.to_csv(OUTPUT_DIR + '11-community-statistics.csv',
                    index=False, encoding='utf-8-sig')
-    df_stats.to_csv(RESULT_DIR + '11-community-statistics.csv',
-                   index=False, encoding='utf-8-sig')
-    print(f"  - {OUTPUT_DIR}11-community-statistics.csv")
-    print(f"  - {RESULT_DIR}11-community-statistics.csv")
+    print("  - ../data/11-community-statistics.csv")
 
     # 5. 시각화
     print("\n[5단계] 커뮤니티 시각화 중...")
@@ -281,12 +298,9 @@ def main():
     print("  - 범정부 조정이 필요한 이슈에서는 클러스터 간 협력이 중요")
 
     print("\n출력 파일:")
-    print(f"  - {OUTPUT_DIR}11-community-assignments.csv")
-    print(f"  - {OUTPUT_DIR}11-community-statistics.csv")
-    print(f"  - {OUTPUT_DIR}11-community-detection.png")
-    print(f"  - {RESULT_DIR}11-community-assignments.csv (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-community-statistics.csv (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-community-detection.png (결과 폴더)")
+    print("  - ../data/11-community-assignments.csv")
+    print("  - ../data/11-community-statistics.csv")
+    print("  - 11-community-detection.png")
 
 if __name__ == "__main__":
     main()

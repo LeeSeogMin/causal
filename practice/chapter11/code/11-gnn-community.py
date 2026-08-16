@@ -1,37 +1,64 @@
 """
-Chapter 11 - Graph Neural Networks and Policy Network Analysis
-11.4 GNN 기반 커뮤니티 탐지
+Chapter 11 - 그래프 신경망과 조직 네트워크 분석
+11.4 GNN으로 노드 임베딩 학습하기
 
-GNN(Graph Neural Network)을 활용한 정책 네트워크 커뮤니티 탐지
+GATv2 레이어 두 층으로 부처마다 벡터(임베딩)를 학습하고,
+그 벡터를 K-Means로 묶어 커뮤니티를 얻는다. Louvain 결과와 비교한다.
+
+수정 이력
+---------
+2026-08-17
+1. 학습 손실 함수가 틀렸다. 원래 코드는
+       loss = F.mse_loss(embeddings, torch.zeros_like(embeddings))
+   였다. 이 식은 "모든 임베딩을 0으로 만들어라"는 뜻이므로,
+   학습할수록 부처 사이 구분이 사라진다. 주석에는 '재구성 손실'이라
+   적혀 있었지만 재구성과 아무 관계가 없었다.
+   → 그래프 자기부호화기(graph autoencoder)의 링크 예측 손실로 교체했다.
+     연결된 두 부처의 임베딩 내적은 크게, 연결 안 된 두 부처의 내적은
+     작게 만드는 이진 교차엔트로피다. 이제 손실이 줄면 실제로
+     연결 구조가 임베딩에 담긴다.
+2. 난수 시드가 없어 실행할 때마다 클러스터가 달라졌다.
+   → torch.manual_seed(42), np.random.seed(42) 추가.
+3. 경로 오류: 프로젝트 루트 기준 상대경로여서 code 폴더에서 실행하면
+   입력 CSV를 못 찾았다. → __file__ 기준 절대경로로 교체.
+4. 폰트 오류: Arial이라 그래프의 한글 부처명이 네모로 나왔다.
+   → Malgun Gothic으로 교체.
+5. plt.show() 때문에 배치 실행이 멈췄다. → Agg 백엔드 + close().
+6. 그림 저장 위치를 diagrams/에서 code 폴더로 옮겼다.
+7. result/ 폴더 중복 저장 삭제.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import networkx as nx
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import warnings
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import GATv2Conv
 from torch_geometric.data import Data
+from torch_geometric.utils import negative_sampling
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정
-matplotlib.rc('font', family='Arial')
+# 재현성: 시드를 고정하지 않으면 실행할 때마다 클러스터가 달라진다
+SEED = 42
+torch.manual_seed(SEED)
+np.random.seed(SEED)
+
+# 한글 폰트 설정 (Windows: Malgun Gothic)
+plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['font.size'] = 10
 
-# 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter11/data/'
-RESULT_DIR = 'result/'
-
-# 디렉토리 생성
-import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, '..', 'data') + os.sep
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(RESULT_DIR, exist_ok=True)
 
 class PolicyGNN(torch.nn.Module):
     """
@@ -185,20 +212,29 @@ def train_gnn_and_cluster(data, num_clusters=5, embedding_dim=16, epochs=200):
     print(f"  - 입력 특성 차원: {num_features}")
     print(f"  - 임베딩 차원: {embedding_dim}")
     print(f"  - 학습 에포크: {epochs}")
+    print(f"  - 손실: 링크 예측 손실(연결된 쌍의 내적은 크게, 안 된 쌍은 작게)")
 
-    # 학습 (비지도 학습 - reconstruction loss)
+    num_nodes = data.num_nodes
+    pos_edge = data.edge_index
+
+    # 학습: 그래프 자기부호화기(GAE)의 링크 예측 손실
     model.train()
     for epoch in range(epochs):
         optimizer.zero_grad()
 
-        # 순전파
-        embeddings = model(data.x, data.edge_index)
+        z = model(data.x, data.edge_index)
 
-        # 재구성 손실: 임베딩 간 거리가 원래 연결 구조를 반영하도록
-        # L2 정규화 + 거리 보존
-        loss = F.mse_loss(embeddings, torch.zeros_like(embeddings))  # 정규화
+        # 연결된 쌍(양성)과 연결 안 된 쌍(음성)을 같은 수만큼 뽑는다
+        neg_edge = negative_sampling(edge_index=pos_edge,
+                                     num_nodes=num_nodes,
+                                     num_neg_samples=pos_edge.size(1))
 
-        # 역전파
+        pos_score = (z[pos_edge[0]] * z[pos_edge[1]]).sum(dim=1)
+        neg_score = (z[neg_edge[0]] * z[neg_edge[1]]).sum(dim=1)
+
+        loss = (F.binary_cross_entropy_with_logits(pos_score, torch.ones_like(pos_score))
+                + F.binary_cross_entropy_with_logits(neg_score, torch.zeros_like(neg_score)))
+
         loss.backward()
         optimizer.step()
 
@@ -210,12 +246,14 @@ def train_gnn_and_cluster(data, num_clusters=5, embedding_dim=16, epochs=200):
     with torch.no_grad():
         embeddings = model(data.x, data.edge_index)
         embeddings_np = embeddings.numpy()
+    print(f"  - 임베딩 표준편차: {embeddings_np.std():.4f}"
+          f"  (0에 가까우면 학습이 무너진 것이다)")
 
     # K-Means 클러스터링
     print(f"\n[K-Means 클러스터링]")
     print(f"  - 클러스터 수: {num_clusters}")
 
-    kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
+    kmeans = KMeans(n_clusters=num_clusters, random_state=SEED, n_init=10)
     cluster_labels = kmeans.fit_predict(embeddings_np)
 
     return embeddings_np, cluster_labels
@@ -289,9 +327,9 @@ def visualize_gnn_clusters(embeddings, cluster_labels, idx_to_node):
         node_name = idx_to_node[idx]
         ax1.text(x, y, node_name, fontsize=8, ha='center', va='center')
 
-    ax1.set_xlabel('Embedding Dimension 1', fontsize=12, fontweight='bold')
-    ax1.set_ylabel('Embedding Dimension 2', fontsize=12, fontweight='bold')
-    ax1.set_title('GNN 기반 정책 네트워크 임베딩', fontsize=14, fontweight='bold')
+    ax1.set_xlabel('임베딩 1축 (PCA)', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('임베딩 2축 (PCA)', fontsize=12, fontweight='bold')
+    ax1.set_title('(a) GNN 임베딩을 2차원으로 줄여 그린 것', fontsize=13, fontweight='bold')
     ax1.legend(loc='best', fontsize=9)
     ax1.grid(True, alpha=0.3)
 
@@ -301,9 +339,9 @@ def visualize_gnn_clusters(embeddings, cluster_labels, idx_to_node):
     cluster_names = [f'Community {i+1}' for i in cluster_sizes.index]
 
     bars = ax2.bar(cluster_names, cluster_sizes.values, color=colors[:len(cluster_sizes)])
-    ax2.set_xlabel('Community', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Number of Ministries', fontsize=12, fontweight='bold')
-    ax2.set_title('GNN 커뮤니티별 부처 수', fontsize=14, fontweight='bold')
+    ax2.set_xlabel('커뮤니티', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('부처 수', fontsize=12, fontweight='bold')
+    ax2.set_title('(b) GNN 커뮤니티별 부처 수', fontsize=13, fontweight='bold')
     ax2.grid(axis='y', alpha=0.3)
 
     # 막대 위에 숫자 표시
@@ -313,8 +351,9 @@ def visualize_gnn_clusters(embeddings, cluster_labels, idx_to_node):
                 f'{int(height)}', ha='center', va='bottom', fontsize=11, fontweight='bold')
 
     plt.tight_layout()
-    plt.savefig("diagrams/11-gnn-community.png", dpi=300, bbox_inches="tight")
-    plt.show()
+    plt.savefig(os.path.join(BASE_DIR, '11-gnn-community.png'),
+                dpi=150, bbox_inches="tight", facecolor='white')
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -370,6 +409,30 @@ def main():
     else:
         print("     → GNN과 Louvain이 서로 다른 관점에서 커뮤니티를 탐지함")
 
+    # 5-1. 두 분할의 모듈러리티를 같은 그래프 위에서 비교
+    from networkx.algorithms import community as nx_comm
+
+    def to_sets(labels):
+        out = {}
+        for idx, lab in enumerate(labels):
+            out.setdefault(int(lab), set()).add(idx_to_node[idx])
+        return list(out.values())
+
+    q_gnn = nx_comm.modularity(G, to_sets(cluster_labels), weight='weight')
+    q_louvain = nx_comm.modularity(G, to_sets(comparison['louvain_labels']), weight='weight')
+    print(f"\n  모듈러리티 Q (같은 그래프, 같은 가중치 기준)")
+    print(f"    Louvain 분할: {q_louvain:.3f}")
+    print(f"    GNN 분할:     {q_gnn:.3f}")
+
+    # 5-2. 두 방법의 배정을 나란히 (커뮤니티 번호 자체는 서로 뜻이 다르다)
+    print("\n  Louvain 배정과 GNN 배정 나란히 보기")
+    rows = [(idx_to_node[i], int(comparison['louvain_labels'][i]),
+             int(cluster_labels[i]) + 1) for i in sorted(idx_to_node.keys())]
+    rows.sort(key=lambda r: (r[1], r[2]))
+    print(f"    {'부처':<20}{'Louvain':>8}{'GNN':>6}")
+    for name, lv, gn in rows:
+        print(f"    {name:<20}{('C' + str(lv)):>8}{('C' + str(gn)):>6}")
+
     # 6. 데이터 저장
     print("\n[6단계] GNN 커뮤니티 데이터 저장 중...")
 
@@ -386,9 +449,7 @@ def main():
 
     df_gnn = pd.DataFrame(gnn_data)
     df_gnn.to_csv(OUTPUT_DIR + '11-gnn-community-assignments.csv', index=False, encoding='utf-8-sig')
-    df_gnn.to_csv(RESULT_DIR + '11-gnn-community-assignments.csv', index=False, encoding='utf-8-sig')
-    print(f"  - {OUTPUT_DIR}11-gnn-community-assignments.csv")
-    print(f"  - {RESULT_DIR}11-gnn-community-assignments.csv")
+    print("  - ../data/11-gnn-community-assignments.csv")
 
     # 비교 결과 저장
     comparison_df = pd.DataFrame({
@@ -396,9 +457,7 @@ def main():
         'Score': [comparison['ari'], comparison['nmi']]
     })
     comparison_df.to_csv(OUTPUT_DIR + '11-gnn-louvain-comparison.csv', index=False, encoding='utf-8-sig')
-    comparison_df.to_csv(RESULT_DIR + '11-gnn-louvain-comparison.csv', index=False, encoding='utf-8-sig')
-    print(f"  - {OUTPUT_DIR}11-gnn-louvain-comparison.csv")
-    print(f"  - {RESULT_DIR}11-gnn-louvain-comparison.csv")
+    print("  - ../data/11-gnn-louvain-comparison.csv")
 
     # 7. 시각화
     print("\n[7단계] GNN 클러스터 시각화 중...")
@@ -419,12 +478,9 @@ def main():
     print("  - 비지도 학습 방식으로 정책 네트워크의 잠재 구조 발견")
 
     print("\n출력 파일:")
-    print(f"  - {OUTPUT_DIR}11-gnn-community-assignments.csv")
-    print(f"  - {OUTPUT_DIR}11-gnn-louvain-comparison.csv")
-    print(f"  - {OUTPUT_DIR}11-gnn-community-visualization.png")
-    print(f"  - {RESULT_DIR}11-gnn-community-assignments.csv (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-gnn-louvain-comparison.csv (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-gnn-community-visualization.png (결과 폴더)")
+    print("  - ../data/11-gnn-community-assignments.csv")
+    print("  - ../data/11-gnn-louvain-comparison.csv")
+    print("  - 11-gnn-community.png")
 
 if __name__ == "__main__":
     main()

@@ -1,10 +1,42 @@
 """
 제4장: Machine Learning Enhanced DID
 Double Machine Learning(DML)을 활용한 DID 추정
+
+수정 이력
+---------
+2026-08-17
+- 증상: 스크립트가 끝까지 실행되지 않고 멈춤. 표준출력에 아무것도 남지 않음.
+- 원인: matplotlib 기본 백엔드가 tkagg여서 plt.show()가 창을 띄우고 사용자
+  입력을 기다린다. 콘솔에서 일괄 실행하면 여기서 무한 대기한다.
+- 조치: pyplot을 import 하기 전에 matplotlib.use('Agg')로 화면 없는 백엔드를
+  지정하고, plt.show() 대신 plt.close()로 그림 객체를 닫는다.
+  PNG 저장(plt.savefig)은 그대로 동작한다.
+
+2026-08-17 (2)
+- 증상 1: 변수 중요도 표가 데이터를 바꿔도 항상 0.28 / 0.19 / 0.15 / 0.12 /
+  0.09 / 0.17로 나왔다. 항목 이름도 데이터에 없는 상호작용 항이었다.
+- 원인 1: feature_importance_analysis()가 RandomForest를 학습해 놓고
+  rf.feature_importances_를 버린 뒤 하드코딩한 표를 반환했다.
+- 조치 1: 학습한 모형의 feature_importances_를 그대로 쓰고, 이름도 실제 공변량
+  X1~X5로 바꿨다.
+
+- 증상 2: "표 4-2의 SE 0.61은 부트스트랩 결과"라는 안내가 출력되는데, 표에 찍힌
+  0.61은 부트스트랩이 아니라 폴드 간 표준편차에서 나온 값이었다.
+- 원인 2: 표준오차를 np.std(폴드별 theta) 기반으로 계산해 놓고, 안내문에만
+  부트스트랩이라고 적었다. 폴드 간 표준편차는 DML의 표준오차가 아니다.
+- 조치 2: 폴드별 잔차를 전부 모아 pooled theta를 구하고, Neyman 직교 모멘트의
+  영향함수로 점근 표준오차를 계산한다. 잘못된 안내문은 지웠다.
+
+- 증상 3: DML 추정값이 전통적 DID보다 작은데 "-5.7% 높게 나타남",
+  "모두 전통적 DID보다 유의하게 높음"으로 출력됐다.
+- 원인 3: 방향을 계산하지 않고 '높음'을 고정 문자열로 붙였다.
+- 조치 3: 부호를 계산해 '높게/낮게'를 고르고, 큰 것과 작은 것의 개수를 센다.
 """
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # 화면 없는 백엔드 (plt.show() 대기 방지)
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
@@ -16,7 +48,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 한글 폰트 설정
-plt.rcParams['font.family'] = 'Arial'
+plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_style("whitegrid")
 
@@ -128,6 +160,9 @@ def dml_did_estimator(df, ml_model='rf', K=5, seed=42):
     theta_estimates = []
     rmse_outcome_list = []
     rmse_treat_list = []
+    # 폴드별 잔차를 전부 모아 둔다 (pooled 추정과 점근 표준오차에 쓴다)
+    Y_res_all = []
+    D_res_all = []
 
     for train_idx, test_idx in kf.split(X):
         X_train, X_test = X[train_idx], X[test_idx]
@@ -157,6 +192,8 @@ def dml_did_estimator(df, ml_model='rf', K=5, seed=42):
         # D̃ = D - Ê[D|X]
         Y_res = Y_test - Y_pred
         D_res = D_test - D_pred
+        Y_res_all.append(Y_res)
+        D_res_all.append(D_res)
 
         # Step 3: 처치효과 추정
         # θ = E[ỸD̃] / E[D̃²]
@@ -164,11 +201,18 @@ def dml_did_estimator(df, ml_model='rf', K=5, seed=42):
             theta = np.sum(Y_res * D_res) / np.sum(D_res**2)
             theta_estimates.append(theta)
 
-    # 최종 추정값: 폴드별 추정값의 평균
-    theta_dml = np.mean(theta_estimates)
+    # 최종 추정값: 폴드별 잔차를 모두 합쳐 한 번에 계산한다 (pooled)
+    Y_res_all = np.concatenate(Y_res_all)
+    D_res_all = np.concatenate(D_res_all)
+    theta_dml = np.sum(Y_res_all * D_res_all) / np.sum(D_res_all ** 2)
 
-    # 표준오차 추정 (보수적 추정)
-    se_dml = np.std(theta_estimates) / np.sqrt(K) * np.sqrt(K-1)
+    # 표준오차: Neyman 직교 모멘트의 영향함수 기반 점근 표준오차
+    #   psi_i = D_res_i * (Y_res_i - theta * D_res_i)
+    #   SE    = sqrt( mean(psi^2) ) / ( sqrt(n) * mean(D_res^2) )
+    n_obs = len(D_res_all)
+    psi = D_res_all * (Y_res_all - theta_dml * D_res_all)
+    jacobian = np.mean(D_res_all ** 2)
+    se_dml = np.sqrt(np.mean(psi ** 2)) / (np.sqrt(n_obs) * jacobian)
 
     # RMSE 평균
     rmse_outcome = np.mean(rmse_outcome_list)
@@ -290,12 +334,12 @@ def feature_importance_analysis(df, seed=42):
                                random_state=seed, n_jobs=-1)
     rf.fit(X, Y)
 
+    labels = ['X1 Industry', 'X2 Economy', 'X3 Density',
+              'X4 Education', 'X5 Accessibility']
     importance_df = pd.DataFrame({
-        'Feature': ['Industry x Economy (X1*X2)', 'Density x Education (X3*X4)',
-                   'Pre-trend (X1)', 'Competition (X3*X5)', 'Accessibility (X5)',
-                   'Others'],
-        'Importance': [0.28, 0.19, 0.15, 0.12, 0.09, 0.17]
-    })
+        'Feature': labels,
+        'Importance': rf.feature_importances_
+    }).sort_values('Importance', ascending=False).reset_index(drop=True)
 
     return importance_df
 
@@ -377,7 +421,7 @@ def visualize_dml_results(results_dict, true_ATE, importance_df):
 
     plt.tight_layout()
     plt.savefig('4-2-ml-did-results.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -415,11 +459,10 @@ def main():
     print("   - 전통적 DID 추정 중...")
     results_dict['Traditional DID'] = traditional_did(df)
 
-    # 2-5. 부트스트랩 표준오차 (선택적 - 시간이 오래 걸림)
-    print("\n   주석: 부트스트랩 표준오차(B=1000)는 시간이 오래 걸려")
-    print("         기본 실행에서는 생략됩니다.")
-    print("         본문 표 4-2의 SE 0.61은 부트스트랩 결과입니다.")
-    print("         K-fold 폴드 간 분산만 사용하면 SE가 0.30으로 과소추정됩니다.")
+    # 2-5. 부트스트랩 표준오차 (선택 사항, 시간이 오래 걸린다)
+    print("\n   주석: 아래 표의 표준오차는 Neyman 직교 모멘트의")
+    print("         영향함수로 계산한 점근 표준오차입니다.")
+    print("         부트스트랩(B=1000)은 run_bootstrap=True로 바꾸면 실행됩니다.")
 
     # 부트스트랩 실행 여부 (기본 False)
     run_bootstrap = False  # True로 변경하면 부트스트랩 실행
@@ -471,9 +514,11 @@ def main():
     dml_rf = results_dict['DML-RF']['theta']
     trad_did = results_dict['Traditional DID']['theta']
 
-    print("\n1. 비선형 관계의 존재:")
+    print("\n1. 두 추정값의 차이:")
+    gap_pct = (dml_rf / trad_did - 1) * 100
+    direction = '높게' if gap_pct >= 0 else '낮게'
     print(f"   - DML 추정값 ({dml_rf:.2f})이 전통적 DID ({trad_did:.2f})보다")
-    print(f"     {(dml_rf/trad_did-1)*100:.1f}% 높게 나타남")
+    print(f"     {abs(gap_pct):.1f}% {direction} 나타남")
     print(f"   - 처치효과가 공변량에 따라 비선형적으로 변하거나")
     print(f"     복잡한 상호작용이 존재함을 시사")
 
@@ -482,7 +527,9 @@ def main():
     dml_estimates = [results_dict[m]['theta'] for m in dml_methods]
     print(f"   - RF, XGBoost, Lasso 추정값이")
     print(f"     {min(dml_estimates):.2f}-{max(dml_estimates):.2f} 범위로 일관")
-    print(f"   - 모두 전통적 DID보다 유의하게 높음")
+    n_above = sum(e > trad_did for e in dml_estimates)
+    print(f"   - 전통적 DID({trad_did:.2f})보다 큰 것 {n_above}개, "
+          f"작은 것 {len(dml_estimates)-n_above}개")
     print(f"   - 비선형 관계가 특정 모형 선택에 의한")
     print(f"     인공적 결과가 아님을 시사")
 

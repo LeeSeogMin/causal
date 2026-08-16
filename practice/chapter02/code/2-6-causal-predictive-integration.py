@@ -3,6 +3,17 @@
 DML + XGBoost를 활용한 한국 탄소 배출 감축 정책 분석
 
 교육 목적: 인과추론과 예측 분석을 통합하여 정책 시나리오를 시뮬레이션
+
+수정 이력
+---------
+2026-08-17
+1) 그래프 축 이름과 범례를 한글로 쓰면서 폰트는 'Arial'로 지정해,
+   저장된 PNG의 한글이 전부 네모로 깨졌다.
+   조치: Malgun Gothic → AppleGothic → NanumGothic 순으로 설치된 폰트를
+   찾아 지정하고, 셋 다 없으면 축 이름을 영문으로 내린다.
+2) 그래프를 practice/chapter02/output/에 저장해 다른 실습 결과와 위치가
+   달랐다. 조치: 다른 스크립트와 같이 code/ 폴더에 저장한다.
+3) 마지막 plt.show()를 plt.close()로 바꿨다. 배치 실행에서 창이 뜨지 않는다.
 """
 
 import numpy as np
@@ -17,9 +28,21 @@ from econml.dr import DRLearner
 import warnings
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정 (Windows/Mac 호환)
-plt.rcParams['font.family'] = 'Arial'
+# 한글 폰트 설정 (Windows/Mac/Linux 호환)
+from matplotlib import font_manager
+_installed = {f.name for f in font_manager.fontManager.ttflist}
+KOREAN_FONT = next((f for f in ['Malgun Gothic', 'AppleGothic', 'NanumGothic']
+                    if f in _installed), None)
+if KOREAN_FONT:
+    plt.rcParams['font.family'] = KOREAN_FONT
+else:
+    plt.rcParams['font.family'] = 'DejaVu Sans'
 plt.rcParams['axes.unicode_minus'] = False
+
+
+def L(ko, en):
+    """한글 폰트가 없으면 영문 레이블로 내린다."""
+    return ko if KOREAN_FONT else en
 
 print("="*80)
 print("제2장 2.6절: Causal ML과 Predictive Analytics 통합")
@@ -243,34 +266,36 @@ fig, axes = plt.subplots(2, 3, figsize=(18, 12))
 # 8.1 에너지 효율 vs. CATE
 ax = axes[0, 0]
 scatter = ax.scatter(efficiency_test, cate_cf, c=firm_size_test, cmap='viridis', alpha=0.5, s=30)
-ax.plot(efficiency_test, cate_test, 'r.', alpha=0.3, markersize=3, label='진짜 CATE')
-ax.set_xlabel('에너지 효율')
-ax.set_ylabel('CATE (톤)')
-ax.set_title('에너지 효율과 처치효과의 관계')
+ax.plot(efficiency_test, cate_test, 'r.', alpha=0.3, markersize=3, label=L('진짜 CATE','True CATE'))
+ax.set_xlabel(L('에너지 효율','Energy efficiency'))
+ax.set_ylabel(L('CATE (톤)','CATE (tons)'))
+ax.set_title(L('에너지 효율과 처치효과의 관계','Efficiency vs treatment effect'))
 ax.legend()
 ax.grid(True, alpha=0.3)
-plt.colorbar(scatter, ax=ax, label='기업 규모')
+plt.colorbar(scatter, ax=ax, label=L('기업 규모','Firm size'))
 
 # 8.2 CATE 분포
 ax = axes[0, 1]
-ax.hist(cate_cf, bins=50, alpha=0.6, label='CausalForest 추정', edgecolor='black')
+ax.hist(cate_cf, bins=50, alpha=0.6, label=L('CausalForest 추정','CausalForest estimate'), edgecolor='black')
 ax.hist(cate_test, bins=50, alpha=0.6, label='진짜 CATE', edgecolor='black')
-ax.axvline(ate_cf, color='blue', linestyle='--', linewidth=2, label=f'평균 (추정): {ate_cf:.1f}')
-ax.axvline(true_ate, color='red', linestyle='--', linewidth=2, label=f'평균 (진짜): {true_ate:.1f}')
-ax.set_xlabel('CATE (톤)')
-ax.set_ylabel('빈도')
-ax.set_title('처치효과 분포')
+ax.axvline(ate_cf, color='blue', linestyle='--', linewidth=2, label=L(f'평균 (추정): {ate_cf:.1f}', f'Mean (est): {ate_cf:.1f}'))
+ax.axvline(true_ate, color='red', linestyle='--', linewidth=2, label=L(f'평균 (참값): {true_ate:.1f}', f'Mean (true): {true_ate:.1f}'))
+ax.set_xlabel(L('CATE (톤)','CATE (tons)'))
+ax.set_ylabel(L('빈도','Frequency'))
+ax.set_title(L('처치효과 분포','CATE distribution'))
 ax.legend()
 ax.grid(True, alpha=0.3)
 
 # 8.3 시나리오별 배출량 비교
 ax = axes[0, 2]
 scenario_means = [scenarios[s].mean() for s in scenarios.keys()]
-scenario_names = ['S1\n현상유지', 'S2\n전면적용', 'S3\n하위50%', 'S4\n하위30%', 'S5\n대기업+\n하위50%']
+scenario_names = [L('S1\n현상유지', 'S1\nbase'), L('S2\n전면적용', 'S2\nall'),
+                  L('S3\n하위50%', 'S3\nbottom50'), L('S4\n하위30%', 'S4\nbottom30'),
+                  L('S5\n대기업+\n하위50%', 'S5\nlarge+b50')]
 colors = ['gray', 'red', 'orange', 'yellow', 'green']
 bars = ax.bar(scenario_names, scenario_means, color=colors, edgecolor='black')
-ax.set_ylabel('평균 배출량 (톤)')
-ax.set_title('정책 시나리오별 배출량 비교')
+ax.set_ylabel(L('평균 배출량 (톤)','Mean emission (tons)'))
+ax.set_title(L('정책 시나리오별 배출량 비교','Emission by policy scenario'))
 ax.grid(True, alpha=0.3, axis='y')
 for i, (bar, val) in enumerate(zip(bars, scenario_means)):
     ax.text(i, val + 5, f'{val:.1f}', ha='center', fontsize=9)
@@ -285,11 +310,11 @@ cate_true_means = [cate_by_efficiency[cate_by_efficiency['quintile'] == q]['true
 width = 0.35
 ax.bar(x_pos - width/2, cate_cf_means, width, label='CausalForest 추정', alpha=0.8, edgecolor='black')
 ax.bar(x_pos + width/2, cate_true_means, width, label='진짜 CATE', alpha=0.8, edgecolor='black')
-ax.set_xlabel('에너지 효율 분위')
-ax.set_ylabel('평균 CATE (톤)')
-ax.set_title('효율 분위별 평균 처치효과')
+ax.set_xlabel(L('에너지 효율 분위','Efficiency quintile'))
+ax.set_ylabel(L('평균 CATE (톤)','Mean CATE (tons)'))
+ax.set_title(L('효율 분위별 평균 처치효과','Mean CATE by efficiency quintile'))
 ax.set_xticks(x_pos)
-ax.set_xticklabels(quintile_order, rotation=15)
+ax.set_xticklabels(quintile_order if KOREAN_FONT else ['B20','B40','Mid','T40','T20'], rotation=15)
 ax.legend()
 ax.grid(True, alpha=0.3, axis='y')
 
@@ -297,7 +322,7 @@ ax.grid(True, alpha=0.3, axis='y')
 ax = axes[1, 1]
 ax.barh(importance_df['feature'], importance_df['importance'], edgecolor='black')
 ax.set_xlabel('Feature Importance')
-ax.set_title('CATE 예측 Feature Importance')
+ax.set_title(L('CATE 예측 Feature Importance','Feature importance for CATE'))
 ax.grid(True, alpha=0.3, axis='x')
 
 # 8.6 시나리오별 감축률과 비용 효율성
@@ -307,14 +332,14 @@ coverage_rates = scenario_results['수급자비율'].values
 efficiency_indices = -reduction_rates / coverage_rates * 100  # 효율성 지수
 
 x_pos = np.arange(len(scenario_results))
-bars1 = ax.bar(x_pos - 0.2, reduction_rates, 0.4, label='감축률 (%)', alpha=0.8, edgecolor='black')
+bars1 = ax.bar(x_pos - 0.2, reduction_rates, 0.4, label=L('감축률 (%)','Reduction (%)'), alpha=0.8, edgecolor='black')
 ax2 = ax.twinx()
-bars2 = ax2.bar(x_pos + 0.2, efficiency_indices, 0.4, color='orange', label='효율성 지수', alpha=0.8, edgecolor='black')
+bars2 = ax2.bar(x_pos + 0.2, efficiency_indices, 0.4, color='orange', label=L('효율성 지수','Efficiency index'), alpha=0.8, edgecolor='black')
 
-ax.set_xlabel('정책 시나리오')
-ax.set_ylabel('감축률 (%)', color='blue')
-ax2.set_ylabel('효율성 지수', color='orange')
-ax.set_title('시나리오별 감축 효과와 효율성')
+ax.set_xlabel(L('정책 시나리오','Policy scenario'))
+ax.set_ylabel(L('감축률 (%)','Reduction (%)'), color='blue')
+ax2.set_ylabel(L('효율성 지수','Efficiency index'), color='orange')
+ax.set_title(L('시나리오별 감축 효과와 효율성','Reduction and efficiency by scenario'))
 ax.set_xticks(x_pos)
 ax.set_xticklabels(scenario_names, rotation=15)
 ax.tick_params(axis='y', labelcolor='blue')
@@ -323,9 +348,8 @@ ax.grid(True, alpha=0.3, axis='y')
 
 plt.tight_layout()
 import os
-output_dir = os.path.join(os.path.dirname(__file__), '..', 'output')
-os.makedirs(output_dir, exist_ok=True)
-output_path = os.path.join(output_dir, '2-6-causal-predictive-integration.png')
+output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           '2-6-causal-predictive-integration.png')
 plt.savefig(output_path, dpi=300, bbox_inches='tight')
 print(f"  시각화 저장 완료: {output_path}")
 print()
@@ -357,4 +381,4 @@ print("※ 본 분석은 교육 목적의 가상 데이터를 사용하였습니
 print("  실제 정책 분석 시 한국환경공단의 공식 배출량 데이터를 사용해야 합니다.")
 print("="*80)
 
-plt.show()
+plt.close()

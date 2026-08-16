@@ -3,18 +3,45 @@
 Basic Quantile Regression
 
 조건부 분위수 추정과 OLS 비교
+
+수정 이력 (2026-08-17)
+---------------------
+1. main()이 visualize_results()를 호출하지 않아 그림 파일이 하나도 만들어지지
+   않았다. 또 visualize_results() 안에서 plt.show()를 불러 파일 저장이 없었다.
+   -> Agg 백엔드를 지정하고 savefig로 7-1-basic-quantile-regression.png를 저장하며,
+      main() 마지막에서 호출하도록 고쳤다.
+2. 결과표의 유의성 표시 '***'가 p값과 무관하게 문자열로 박혀 있었다.
+   -> 각 계수의 p값을 읽어 표시를 붙이도록 고쳤다.
+3. 해석 출력이 계수를 "% 증가"로 적었다. 이 데이터의 income은 로그가 아니라
+   수준 변수(33.87~302.05)이므로 계수의 단위는 %가 아니다.
+   -> "소득 x.xx 증가(수준 단위)"로 고쳤다.
+4. 교육과 경력의 변동폭을 부호 있는 값으로 비교해 "-0.06이 3.08보다 작다"는
+   식으로 출력했다.
+   -> 절댓값으로 비교하도록 고쳤다.
 """
 
+import os
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import seaborn as sns
 import statsmodels.formula.api as smf
-from matplotlib import font_manager as fm
 
-# 한글 폰트 설정
+# 그림은 영문 레이블로 그린다 (PDF 변환 시 폰트 문제 회피)
 plt.rcParams['font.family'] = 'Arial'
 plt.rcParams['axes.unicode_minus'] = False
+
+
+def stars(pvalue):
+    """p값에 따른 유의성 표시"""
+    if pvalue < 0.001:
+        return '***'
+    if pvalue < 0.01:
+        return '**'
+    if pvalue < 0.05:
+        return '*'
+    return ''
 
 def estimate_quantile_regression(df, quantiles):
     """
@@ -222,7 +249,12 @@ def visualize_results(df, qr_results, ols_res, quantiles):
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.show()
+
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    output_path = os.path.join(base_path, '7-1-basic-quantile-regression.png')
+    plt.savefig(output_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f"그래프 저장 완료: {output_path}")
 
 def main():
     """메인 실행 함수"""
@@ -264,18 +296,18 @@ def main():
 
         results_table.append({
             'Quantile': f'{q:.2f}',
-            'Edu_Coef': f'{edu_coef:.2f}***',
+            'Edu_Coef': f'{edu_coef:.2f}{stars(qr_results[q].pvalues["education"])}',
             'Edu_SE': f'({edu_se:.2f})',
-            'Exp_Coef': f'{exp_coef:.2f}***',
+            'Exp_Coef': f'{exp_coef:.2f}{stars(qr_results[q].pvalues["experience"])}',
             'Exp_SE': f'({exp_se:.2f})'
         })
 
     # OLS 추가
     results_table.append({
         'Quantile': 'OLS',
-        'Edu_Coef': f'{ols_res.params["education"]:.2f}***',
+        'Edu_Coef': f'{ols_res.params["education"]:.2f}{stars(ols_res.pvalues["education"])}',
         'Edu_SE': f'({ols_res.bse["education"]:.2f})',
-        'Exp_Coef': f'{ols_res.params["experience"]:.2f}***',
+        'Exp_Coef': f'{ols_res.params["experience"]:.2f}{stars(ols_res.pvalues["experience"])}',
         'Exp_SE': f'({ols_res.bse["experience"]:.2f})'
     })
 
@@ -315,26 +347,31 @@ def main():
     edu_coef_090 = qr_results[0.90].params['education']
     edu_coef_ols = ols_res.params['education']
 
-    print(f"\n1. 교육 수익률의 이질성:")
-    print(f"   - 저소득층(τ=0.10): 교육 1년당 소득 {edu_coef_010:.2f}% 증가")
-    print(f"   - 고소득층(τ=0.90): 교육 1년당 소득 {edu_coef_090:.2f}% 증가")
-    print(f"   - OLS 평균 효과: 교육 1년당 소득 {edu_coef_ols:.2f}% 증가")
-    print(f"   - 해석: 고소득층에서 교육 수익률이 {edu_coef_090/edu_coef_010:.1f}배 높음")
-    print(f"           교육이 불평등을 심화시킬 가능성")
+    print(f"\n1. 교육 수익률의 이질성 (income은 수준 변수, 단위 없음):")
+    print(f"   - 저소득층(τ=0.10): 교육 1년당 소득 {edu_coef_010:.2f} 증가")
+    print(f"   - 고소득층(τ=0.90): 교육 1년당 소득 {edu_coef_090:.2f} 증가")
+    print(f"   - OLS 평균 효과: 교육 1년당 소득 {edu_coef_ols:.2f} 증가")
+    print(f"   - 해석: 고소득층에서 교육 수익률이 {edu_coef_090/edu_coef_010:.1f}배 크다")
 
     exp_coef_010 = qr_results[0.10].params['experience']
     exp_coef_090 = qr_results[0.90].params['experience']
+    edu_spread = abs(edu_coef_090 - edu_coef_010)
+    exp_spread = abs(exp_coef_090 - exp_coef_010)
 
     print(f"\n2. 경력의 분포적 효과:")
-    print(f"   - 저소득층(τ=0.10): 경력 1년당 소득 {exp_coef_010:.2f}% 증가")
-    print(f"   - 고소득층(τ=0.90): 경력 1년당 소득 {exp_coef_090:.2f}% 증가")
-    print(f"   - 변동폭: 교육({edu_coef_090-edu_coef_010:.2f})보다 경력({exp_coef_090-exp_coef_010:.2f})이 작음")
-    print(f"   - 해석: 경력의 효과가 상대적으로 균등하게 분포")
+    print(f"   - 저소득층(τ=0.10): 경력 1년당 소득 {exp_coef_010:.2f} 증가")
+    print(f"   - 고소득층(τ=0.90): 경력 1년당 소득 {exp_coef_090:.2f} 증가")
+    print(f"   - 분위 간 변동폭(절댓값): 교육 {edu_spread:.2f} vs 경력 {exp_spread:.2f}")
+    print(f"   - 해석: 경력의 효과는 분위에 따라 거의 변하지 않는다")
 
     print(f"\n3. OLS의 한계:")
-    print(f"   - OLS는 평균 효과만 포착 (교육: {edu_coef_ols:.2f}%)")
-    print(f"   - 분포의 극단(tail)에서의 효과를 반영하지 못함")
-    print(f"   - 정책 대상이 저소득층이면 τ=0.10~0.25의 추정량이 더 관련성 높음")
+    print(f"   - OLS는 평균 효과 하나만 준다 (교육: {edu_coef_ols:.2f})")
+    print(f"   - τ=0.10의 {edu_coef_010:.2f}와 τ=0.90의 {edu_coef_090:.2f}를 하나로 뭉갠다")
+    print(f"   - 정책 대상이 저소득층이면 τ=0.10~0.25의 추정량을 본다")
+
+    # 시각화
+    print("\n[시각화] 결과 그래프 생성 중...")
+    visualize_results(df, qr_results, ols_res, quantiles)
 
 if __name__ == "__main__":
     main()

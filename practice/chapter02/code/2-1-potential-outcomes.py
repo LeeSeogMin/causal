@@ -1,6 +1,15 @@
 """
 제2장 2.1절: Potential Outcomes Framework
 Rubin의 잠재적 결과 프레임워크를 통한 선택편향과 인과효과 이해
+
+수정 이력
+---------
+2026-08-17
+1) 마지막 요약에서 "X1, X2, X3의 SMD > 0.5로 심각한 불균형"을 하드코딩해
+   출력했다. 실제 계산값은 X1 0.55, X2 -0.20, X3 -0.01이라 X2·X3는 틀린
+   서술이다. 조치: |SMD| > 0.1인 공변량을 계산해서 이름과 값을 출력한다.
+2) 그래프 저장 경로를 __file__ 기준 절대경로로 바꿨다. 어느 디렉터리에서
+   실행해도 code/ 폴더에 저장된다.
 """
 
 import numpy as np
@@ -200,8 +209,10 @@ for bar, val in zip(bars, values):
             f'{val:.2f}', ha='center', va='bottom', fontsize=10)
 
 plt.tight_layout()
-plt.savefig('potential_outcomes_analysis.png', dpi=150, bbox_inches='tight')
-print("  시각화 저장 완료: potential_outcomes_analysis.png")
+png_path = os.path.join(base_path, 'potential_outcomes_analysis.png')
+plt.savefig(png_path, dpi=150, bbox_inches='tight')
+plt.close()
+print(f"  시각화 저장 완료: {png_path}")
 print()
 
 print("=" * 70)
@@ -211,7 +222,9 @@ print()
 print("주요 시사점:")
 print(f"  1. 선택편향: Naive 추정값({naive_estimate:.2f})은 참값 ATT({true_ATT:.2f})보다")
 print(f"     {bias_ratio:.1f}% 과대추정되어 있음")
-print(f"  2. 공변량 불균형: X1, X2, X3의 SMD > 0.5로 심각한 불균형")
+imbalanced = [f'X{i+1}({smd[i]:.2f})' for i in range(5) if abs(smd[i]) > 0.1]
+print(f"  2. 공변량 불균형: |SMD| > 0.1인 공변량 {len(imbalanced)}개"
+      + (f" — {', '.join(imbalanced)}" if imbalanced else ""))
 print(f"  3. Overlap: {outside_support}개({outside_ratio:.1f}%) 개체가 공통지지 밖")
 print()
 print("※ 본 코드는 교육 목적의 시뮬레이션입니다.")

@@ -1,31 +1,45 @@
 """
-Chapter 11 - Graph Neural Networks and Policy Network Analysis
-11.2.2 Centrality Analysis
+Chapter 11 - 그래프 신경망과 조직 네트워크 분석
+11.2 네트워크 중심성 분석
 
-네트워크 중심성 지표 계산과 정책 영향력 측정
+네 가지 중심성 지표를 계산해 "누가 중요한 부처인가"를 지표별로 비교한다.
+
+수정 이력
+---------
+2026-08-17
+1. 경로 오류: 프로젝트 루트 기준 상대경로여서 code 폴더에서 실행하면
+   입력 CSV를 못 찾고 "먼저 11-government-network.py를 실행하세요"만 찍고 끝났다.
+   → __file__ 기준 절대경로로 교체.
+2. 폰트 오류: matplotlib.rc('font', family='Arial')이라 그래프의 한글 부처명이
+   전부 네모(tofu)로 나왔다. → Malgun Gothic으로 교체.
+3. plt.show() 때문에 배치 실행이 멈췄다. → Agg 백엔드 + close().
+4. 그림 저장 위치를 diagrams/(개념도 폴더)에서 code 폴더로 옮겼다.
+5. 근접·매개 중심성에 distance/weight='weight'를 그대로 넘겨
+   '협업이 강할수록 거리가 멀다'로 계산되고 있었다.
+   가중치 0.8은 강한 협업이므로 거리로는 짧아야 한다.
+   → 거리 = 1/weight 를 별도 속성으로 만들어 근접 중심성에 쓴다.
+6. result/ 폴더 중복 저장 삭제.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import networkx as nx
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정
-matplotlib.rc('font', family='Arial')
+# 한글 폰트 설정 (Windows: Malgun Gothic)
+plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['font.size'] = 10
 
-# 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter11/data/'
-RESULT_DIR = 'result/'
-
-# 디렉토리 생성
-import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, '..', 'data') + os.sep
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(RESULT_DIR, exist_ok=True)
 
 def load_government_network():
     """저장된 네트워크 데이터 로드"""
@@ -57,70 +71,64 @@ def calculate_all_centralities(G):
     # 무방향 그래프로 변환 (일부 중심성 계산용)
     G_undirected = G.to_undirected()
 
-    centrality_data = []
+    # 거리 속성 만들기: 협업 강도가 셀수록 두 부처 사이는 '가깝다'
+    # weight 0.8 -> distance 1.25, weight 0.5 -> distance 2.0
+    for u, v, d in G_undirected.edges(data=True):
+        d['distance'] = 1.0 / d['weight']
 
+    deg = nx.degree_centrality(G_undirected)
+    indeg = nx.in_degree_centrality(G)
+    outdeg = nx.out_degree_centrality(G)
+    clo = nx.closeness_centrality(G_undirected, distance='distance')
+    btw = nx.betweenness_centrality(G_undirected, weight='distance', normalized=True)
+    eig = nx.eigenvector_centrality(G_undirected, weight='weight', max_iter=1000)
+
+    centrality_data = []
     for node in G.nodes():
-        data = {
+        centrality_data.append({
             'ministry': node,
-            # 연결 중심성 (degree centrality)
-            'degree_centrality': nx.degree_centrality(G_undirected)[node],
-            'in_degree_centrality': nx.in_degree_centrality(G)[node],
-            'out_degree_centrality': nx.out_degree_centrality(G)[node],
-            # 근접 중심성 (closeness centrality)
-            'closeness_centrality': nx.closeness_centrality(G_undirected, distance='weight')[node],
-            # 매개 중심성 (betweenness centrality)
-            'betweenness_centrality': nx.betweenness_centrality(G_undirected, weight='weight')[node],
-            # 고유벡터 중심성 (eigenvector centrality)
-            'eigenvector_centrality': nx.eigenvector_centrality(G_undirected, weight='weight', max_iter=1000)[node]
-        }
-        centrality_data.append(data)
+            'degree_centrality': deg[node],
+            'in_degree_centrality': indeg[node],
+            'out_degree_centrality': outdeg[node],
+            'closeness_centrality': clo[node],
+            'betweenness_centrality': btw[node],
+            'eigenvector_centrality': eig[node],
+        })
 
     df_centrality = pd.DataFrame(centrality_data)
 
     return df_centrality
 
 def visualize_centrality_comparison(df_centrality):
-    """중심성 지표 비교 시각화"""
-    # 상위 5개 부처만 선택
-    df_top = df_centrality.nlargest(5, 'degree_centrality')
+    """중심성 지표 비교 시각화
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    지표마다 상위 5개를 따로 뽑는다. 지표가 바뀌면 명단도 바뀐다는 것이
+    이 그림의 요점이다.
+    """
+    specs = [
+        ('degree_centrality', '연결 중심성', 'steelblue', '(a) 연결 중심성 상위 5'),
+        ('betweenness_centrality', '매개 중심성', 'coral', '(b) 매개 중심성 상위 5'),
+        ('closeness_centrality', '근접 중심성', 'mediumseagreen', '(c) 근접 중심성 상위 5'),
+        ('eigenvector_centrality', '고유벡터 중심성', 'mediumpurple', '(d) 고유벡터 중심성 상위 5'),
+    ]
 
-    # (1) 연결 중심성
-    ax1 = axes[0, 0]
-    df_plot = df_top.sort_values('degree_centrality', ascending=True)
-    ax1.barh(df_plot['ministry'], df_plot['degree_centrality'], color='steelblue', alpha=0.7)
-    ax1.set_xlabel('Degree Centrality', fontsize=11)
-    ax1.set_title('(a) Degree Centrality (Top 5)', fontsize=12, fontweight='bold')
-    ax1.grid(True, alpha=0.3, axis='x')
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
 
-    # (2) 매개 중심성
-    ax2 = axes[0, 1]
-    df_plot = df_top.sort_values('betweenness_centrality', ascending=True)
-    ax2.barh(df_plot['ministry'], df_plot['betweenness_centrality'], color='coral', alpha=0.7)
-    ax2.set_xlabel('Betweenness Centrality', fontsize=11)
-    ax2.set_title('(b) Betweenness Centrality (Top 5)', fontsize=12, fontweight='bold')
-    ax2.grid(True, alpha=0.3, axis='x')
-
-    # (3) 근접 중심성
-    ax3 = axes[1, 0]
-    df_plot = df_top.sort_values('closeness_centrality', ascending=True)
-    ax3.barh(df_plot['ministry'], df_plot['closeness_centrality'], color='mediumseagreen', alpha=0.7)
-    ax3.set_xlabel('Closeness Centrality', fontsize=11)
-    ax3.set_title('(c) Closeness Centrality (Top 5)', fontsize=12, fontweight='bold')
-    ax3.grid(True, alpha=0.3, axis='x')
-
-    # (4) 고유벡터 중심성
-    ax4 = axes[1, 1]
-    df_plot = df_top.sort_values('eigenvector_centrality', ascending=True)
-    ax4.barh(df_plot['ministry'], df_plot['eigenvector_centrality'], color='mediumpurple', alpha=0.7)
-    ax4.set_xlabel('Eigenvector Centrality', fontsize=11)
-    ax4.set_title('(d) Eigenvector Centrality (Top 5)', fontsize=12, fontweight='bold')
-    ax4.grid(True, alpha=0.3, axis='x')
+    for ax, (col, xlab, color, title) in zip(axes.ravel(), specs):
+        df_plot = df_centrality.nlargest(5, col).sort_values(col, ascending=True)
+        bars = ax.barh(df_plot['ministry'], df_plot[col], color=color, alpha=0.8)
+        for bar, val in zip(bars, df_plot[col]):
+            ax.text(val, bar.get_y() + bar.get_height() / 2, f' {val:.3f}',
+                    va='center', fontsize=9)
+        ax.set_xlabel(xlab, fontsize=11)
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.grid(True, alpha=0.3, axis='x')
+        ax.set_xlim(0, df_plot[col].max() * 1.30)
 
     plt.tight_layout()
-    plt.savefig('diagrams/11-centrality-comparison.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(BASE_DIR, '11-centrality-analysis.png'),
+                dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -171,14 +179,28 @@ def main():
     for idx, row in df_eigen_top.iterrows():
         print(f"  {row['ministry']:20s}: {row['eigenvector_centrality']:.3f}")
 
+    # 3-1. 지표별 순위가 얼마나 다른지
+    print("\n[3-1단계] 연결 중심성 순위 vs 매개 중심성 순위")
+    df_rank = df_centrality.copy()
+    df_rank['연결순위'] = df_rank['degree_centrality'].rank(ascending=False, method='min').astype(int)
+    df_rank['매개순위'] = df_rank['betweenness_centrality'].rank(ascending=False, method='min').astype(int)
+    df_rank['순위차'] = df_rank['매개순위'] - df_rank['연결순위']
+    df_rank = df_rank.sort_values('연결순위')
+    print(f"  {'부처':<20}{'연결순위':>8}{'매개순위':>8}{'차이':>6}")
+    for _, r in df_rank.head(8).iterrows():
+        print(f"  {r['ministry']:<20}{r['연결순위']:>8}{r['매개순위']:>8}{r['순위차']:>+6}")
+    corr_dg_bt = df_centrality['degree_centrality'].corr(
+        df_centrality['betweenness_centrality'])
+    corr_dg_ev = df_centrality['degree_centrality'].corr(
+        df_centrality['eigenvector_centrality'])
+    print(f"\n  연결-매개 상관: {corr_dg_bt:.3f}")
+    print(f"  연결-고유벡터 상관: {corr_dg_ev:.3f}")
+
     # 4. 데이터 저장
     print("\n[4단계] 중심성 데이터 저장 중...")
     df_centrality.to_csv(OUTPUT_DIR + '11-centrality-analysis.csv',
                         index=False, encoding='utf-8-sig')
-    df_centrality.to_csv(RESULT_DIR + '11-centrality-analysis.csv',
-                        index=False, encoding='utf-8-sig')
-    print(f"  - {OUTPUT_DIR}11-centrality-analysis.csv")
-    print(f"  - {RESULT_DIR}11-centrality-analysis.csv")
+    print(f"  - ../data/11-centrality-analysis.csv")
 
     # 5. 시각화
     print("\n[5단계] 중심성 비교 시각화 중...")
@@ -215,10 +237,8 @@ def main():
     print("  - 높은 고유벡터 중심성은 네트워크 내 엘리트 위치를 반영")
 
     print("\n출력 파일:")
-    print(f"  - {OUTPUT_DIR}11-centrality-analysis.csv")
-    print(f"  - {OUTPUT_DIR}11-centrality-comparison.png")
-    print(f"  - {RESULT_DIR}11-centrality-analysis.csv (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-centrality-comparison.png (결과 폴더)")
+    print("  - ../data/11-centrality-analysis.csv")
+    print("  - 11-centrality-analysis.png")
 
 if __name__ == "__main__":
     main()

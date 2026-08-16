@@ -1,8 +1,17 @@
 """
 제5장: RDD 타당성 검정
 McCrary 밀도 검정, 공변량 균형, 플라시보 검정, 도넛홀 분석
+
+수정 이력
+---------
+2026-08-17
+1) 한글 폰트: `font.family`가 'DejaVu Sans'였다. DejaVu Sans에는 한글 글리프가
+   없어 6개 패널의 축 이름·제목 한글이 빈 사각형으로 저장됐다. 설치된 한글 폰트를
+   찾아 지정하도록 고쳤다.
+2) 저장 경로 안내: print 문이 실제 저장 위치와 다른 경로를 찍었다. 실제 경로를 찍는다.
 """
 
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -13,8 +22,12 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from matplotlib import font_manager as fm
 
-# 한글 폰트 설정 (플랫폼 독립적)
-plt.rcParams['font.family'] = 'DejaVu Sans'
+# 한글 폰트 설정: 설치된 한글 폰트를 순서대로 찾아 지정한다
+_installed = {f.name for f in fm.fontManager.ttflist}
+for _name in ['Malgun Gothic', 'AppleGothic', 'NanumGothic', 'Noto Sans CJK KR']:
+    if _name in _installed:
+        plt.rcParams['font.family'] = _name
+        break
 plt.rcParams['axes.unicode_minus'] = False
 
 # 랜덤 시드 설정
@@ -322,8 +335,9 @@ ax6.set_title('(f) 공변량 연속성 확인 (연령)', fontsize=12, fontweight
 ax6.legend(fontsize=9)
 ax6.grid(alpha=0.3)
 
-plt.savefig('5-3-validity-tests.png', dpi=300, bbox_inches='tight')
-print("그래프 저장 완료: practice/chapter05/5-3-validity-tests.png")
+_out = os.path.join(base_path, '5-3-validity-tests.png')
+plt.savefig(_out, dpi=300, bbox_inches='tight')
+print(f"그래프 저장 완료: {_out}")
 
 # 7. 최종 요약
 print("\n" + "=" * 80)
