@@ -3,10 +3,21 @@ Chapter 11 - Graph Neural Networks and Policy Network Analysis
 11.4.3 Network Evolution Prediction with Random Forest
 
 네트워크 진화 예측 모델링
+
+수정 이력
+---------
+2026-08-17
+1. 경로가 프로젝트 루트 기준 상대경로여서 code 폴더에서 실행하면
+   FileNotFoundError로 죽었다. → __file__ 기준 절대경로로 교체.
+2. plt.show() 때문에 배치 실행이 멈췄다. → Agg 백엔드 + close().
+3. 그림 저장 위치를 diagrams/(강의노트 개념도 폴더)에서 code 폴더로 옮겼다.
+4. result/ 폴더 중복 저장 삭제.
 """
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
@@ -20,7 +31,9 @@ plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 
 # 출력 디렉토리
-DIAGRAM_DIR = 'diagrams/'
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DIAGRAM_DIR = BASE_DIR + os.sep
 
 def generate_historical_network_data():
     """
@@ -225,9 +238,9 @@ def plot_network_evolution(historical_df, prediction_df, save_path):
     plt.suptitle('정부 부처 네트워크 진화 예측 (2020~2025)',
                  fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight',
+    plt.savefig(save_path, dpi=150, bbox_inches='tight',
                 facecolor='white', edgecolor='none')
-    plt.show()
+    plt.close()
 
     print(f"그래프 저장 완료: {save_path}")
 

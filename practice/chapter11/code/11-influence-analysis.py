@@ -3,11 +3,22 @@ Chapter 11 - Graph Neural Networks and Policy Network Analysis
 11.2.3 Policy Influence and Centrality Relationship
 
 종합 영향력 점수 계산 및 중심성 지표 간 상관관계 분석
+
+수정 이력
+---------
+2026-08-17
+1. 경로가 프로젝트 루트 기준 상대경로여서 code 폴더에서 실행하면
+   FileNotFoundError로 죽었다. → __file__ 기준 절대경로로 교체.
+2. plt.show() 때문에 배치 실행이 멈췄다. → Agg 백엔드 + close().
+3. 그림 저장 위치를 diagrams/(강의노트 개념도 폴더)에서 code 폴더로 옮겼다.
+4. result/ 폴더 중복 저장 삭제.
 """
 
 import numpy as np
 import pandas as pd
 import networkx as nx
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib
@@ -20,13 +31,13 @@ matplotlib.rc('font', family='Malgun Gothic')
 plt.rcParams['axes.unicode_minus'] = False
 
 # 출력 디렉토리
-OUTPUT_DIR = 'practice/chapter11/data/'
-RESULT_DIR = 'result/'
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, '..', 'data') + os.sep
 
 # 디렉토리 생성
 import os
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(RESULT_DIR, exist_ok=True)
 
 def load_centrality_data():
     """중심성 데이터 로드"""
@@ -146,8 +157,8 @@ def visualize_influence_analysis(df_influence, correlation_matrix):
     cbar.set_label('Influence Score', fontsize=9)
 
     plt.tight_layout()
-    plt.savefig("diagrams/11-influence-analysis.png", dpi=300, bbox_inches="tight")
-    plt.show()
+    plt.savefig(os.path.join(BASE_DIR, "11-influence-analysis.png"), dpi=150, bbox_inches="tight", facecolor="white")
+    plt.close()
 
 def main():
     """메인 실행 함수"""
@@ -201,17 +212,11 @@ def main():
     print("\n[5단계] 영향력 분석 데이터 저장 중...")
     df_ranked.to_csv(OUTPUT_DIR + '11-influence-ranking.csv',
                     index=False, encoding='utf-8-sig')
-    df_ranked.to_csv(RESULT_DIR + '11-influence-ranking.csv',
-                    index=False, encoding='utf-8-sig')
     print(f"  - {OUTPUT_DIR}11-influence-ranking.csv")
-    print(f"  - {RESULT_DIR}11-influence-ranking.csv")
 
     correlation_matrix.to_csv(OUTPUT_DIR + '11-centrality-correlation.csv',
                              encoding='utf-8-sig')
-    correlation_matrix.to_csv(RESULT_DIR + '11-centrality-correlation.csv',
-                             encoding='utf-8-sig')
     print(f"  - {OUTPUT_DIR}11-centrality-correlation.csv")
-    print(f"  - {RESULT_DIR}11-centrality-correlation.csv")
 
     # 6. 시각화
     print("\n[6단계] 영향력 분석 시각화 중...")
@@ -254,9 +259,6 @@ def main():
     print(f"  - {OUTPUT_DIR}11-influence-ranking.csv")
     print(f"  - {OUTPUT_DIR}11-centrality-correlation.csv")
     print(f"  - {OUTPUT_DIR}11-influence-analysis.png")
-    print(f"  - {RESULT_DIR}11-influence-ranking.csv (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-centrality-correlation.csv (결과 폴더)")
-    print(f"  - {RESULT_DIR}11-influence-analysis.png (결과 폴더)")
 
 if __name__ == "__main__":
     main()
