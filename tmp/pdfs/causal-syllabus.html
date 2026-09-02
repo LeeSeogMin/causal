@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>강의계획서</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="C:\Users\user\Documents\lee\class\2026-2\basic_DL\tmp\pdfs\pdf.css" />
+</head>
+<body>
+<h1 id="정책분석과평가방법-강의계획서">정책분석과평가방법
+강의계획서</h1>
+<h2 id="강의-개요">1. 강의 개요</h2>
+<ul>
+<li><strong>교과목명:</strong> 정책분석과평가방법</li>
+<li><strong>수업 구성:</strong> 3학점, 주 3시간, 이론 40%와 실습
+60%</li>
+<li><strong>담당교수:</strong> 이석민</li>
+<li><strong>실습 환경:</strong> Python, Jupyter Notebook 또는 VS
+Code</li>
+<li><strong>준비물:</strong> 개인 노트북, Python 실행 환경</li>
+</ul>
+<p>데이터에서 인과관계를 식별하고 추정하는 방법을 배운다. 전통적인
+정책평가 방법과 머신러닝 기반 인과추론을 Python으로 실습하고, 결과를
+정책 및 비즈니스 의사결정에 적용한다.</p>
+<h2 id="학습목표">2. 학습목표</h2>
+<p>수업을 마친 학생은 다음을 할 수 있다.</p>
+<ol type="1">
+<li>잠재적 결과와 인과효과의 의미를 설명한다.</li>
+<li>연구 질문과 자료에 맞는 식별전략을 세운다.</li>
+<li>매칭, DID, 합성통제, RDD, 도구변수를 적용하고 가정을 점검한다.</li>
+<li>DML과 Causal Forest로 이질적 처치효과를 분석한다.</li>
+<li>실험·시계열·텍스트·네트워크 자료의 인과분석 가능성과 한계를
+판단한다.</li>
+<li>분석 코드와 결과를 재현하고 해석 범위를 설명한다.</li>
+</ol>
+<h2 id="수업-운영">3. 수업 운영</h2>
+<p>매주 이론과 Python 실습을 함께 진행한다. 학생은 수업 중 실행한 실습
+결과를 제출한다. AI 도구를 사용할 수 있지만 출처를 표시하고 생성된
+코드와 설명을 직접 검증해야 한다.</p>
+<p>실습에는 NumPy, Pandas, statsmodels, scikit-learn, EconML과 시각화
+도구를 사용한다. 일부 주차에는 PyTorch 또는 TensorFlow/Keras를
+사용한다.</p>
+<h2 id="평가">4. 평가</h2>
+<table>
+<thead>
+<tr>
+<th>평가 항목</th>
+<th style="text-align: right;">비율</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>중간고사</td>
+<td style="text-align: right;">30%</td>
+</tr>
+<tr>
+<td>기말고사·프로젝트</td>
+<td style="text-align: right;">30%</td>
+</tr>
+<tr>
+<td>주차별 실습 과제</td>
+<td style="text-align: right;">20%</td>
+</tr>
+<tr>
+<td>출석과 참여</td>
+<td style="text-align: right;">20%</td>
+</tr>
+</tbody>
+</table>
+<p>평가에서는 핵심 개념, 코드 해석, 식별전략, 분석 결과의 재현성과
+해석을 확인한다.</p>
+<h2 id="주차별-계획">5. 주차별 계획</h2>
+<table>
+<colgroup>
+<col style="width: 40%" />
+<col style="width: 30%" />
+<col style="width: 30%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: right;">주차</th>
+<th>주제</th>
+<th>주요 활동</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">1 (9/7, 9/9)</td>
+<td>인과추론 기초</td>
+<td>잠재적 결과, 인과 질문, 개발 환경 설정</td>
+</tr>
+<tr>
+<td style="text-align: right;">2 (9/14, 9/16)</td>
+<td>식별과 무작위화</td>
+<td>무작위실험과 관찰자료의 식별 문제</td>
+</tr>
+<tr>
+<td style="text-align: right;">3 (9/21, 9/23)</td>
+<td>매칭과 성향점수</td>
+<td>PSM, 머신러닝 기반 성향점수, 균형 점검</td>
+</tr>
+<tr>
+<td style="text-align: right;">4 (9/28, 9/30)</td>
+<td>차이-차이와 합성통제</td>
+<td>DID, 고정효과, 합성통제 실습</td>
+</tr>
+<tr>
+<td style="text-align: right;">5 (10/5, 10/7)</td>
+<td>회귀단절설계</td>
+<td>Sharp·Fuzzy RDD와 대역폭 선택</td>
+</tr>
+<tr>
+<td style="text-align: right;">6 (10/12, 10/14)</td>
+<td>도구변수</td>
+<td>식별조건, 2SLS, 강건성 검사, DeepIV 개요</td>
+</tr>
+<tr>
+<td style="text-align: right;">7 (10/19, 10/21)</td>
+<td>이질적 처치효과</td>
+<td>DML과 Causal Forest 적용</td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>8 (10/26 중간고사, 10/29
+휴강)</strong></td>
+<td>중간고사</td>
+<td>이론과 코드 해석 평가</td>
+</tr>
+<tr>
+<td style="text-align: right;">9 (11/2, 11/4)</td>
+<td>실험설계</td>
+<td>A/B 테스트와 적응형 실험</td>
+</tr>
+<tr>
+<td style="text-align: right;">10 (11/9, 11/11)</td>
+<td>시계열 인과분석</td>
+<td>정책지표 예측과 시계열 모델</td>
+</tr>
+<tr>
+<td style="text-align: right;">11 (11/16, 11/18)</td>
+<td>텍스트 인과분석</td>
+<td>문서 전처리·분류·요약과 인과적 활용</td>
+</tr>
+<tr>
+<td style="text-align: right;">12 (11/23, 11/25)</td>
+<td>네트워크와 확산</td>
+<td>중심성, 커뮤니티, GNN, 전파 분석</td>
+</tr>
+<tr>
+<td style="text-align: right;">13 (11/30, 12/2)</td>
+<td>복잡계와 정책실험</td>
+<td>ABM, 시뮬레이션, 강화학습 기초</td>
+</tr>
+<tr>
+<td style="text-align: right;">14 (12/7, 12/9)</td>
+<td>프로젝트 워크숍</td>
+<td>데이터 분석과 코드·보고서 재현성 점검</td>
+</tr>
+<tr>
+<td style="text-align: right;"><strong>15 (12/14 기말고사)</strong></td>
+<td>프로젝트 발표</td>
+<td>최종 발표와 코드·보고서 제출</td>
+</tr>
+</tbody>
+</table>
+<h2 id="기말-프로젝트">6. 기말 프로젝트</h2>
+<p>학생은 정책 또는 비즈니스 문제 하나를 골라 인과분석을 수행한다. 개인
+또는 팀으로 진행할 수 있다.</p>
+<p>제출물에는 다음 내용을 포함한다.</p>
+<ul>
+<li>인과 질문과 식별전략</li>
+<li>데이터와 전처리 과정</li>
+<li>분석 코드와 실행 결과</li>
+<li>주요 가정과 강건성 점검</li>
+<li>결과 해석과 적용 한계</li>
+</ul>
+<p>담당교수 연락처는 <code>newmind68@hs.ac.kr</code>이며, 상담은 사전
+예약으로 진행한다.</p>
+</body>
+</html>
