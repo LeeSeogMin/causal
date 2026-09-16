@@ -413,6 +413,51 @@ def main():
     else:
         print(f"   → 주의: 신뢰구간 포함률이 기대보다 낮음")
 
+    # =========================================================================
+    # 모형 진단 (강의자료 2.5.4 '결과를 읽는 법'에 대응)
+    # =========================================================================
+    print("\n[모형 진단]")
+
+    from sklearn.model_selection import KFold
+
+    # 보조 모형의 설명력: 교차 적합으로 out-of-fold 예측을 만들어 R²를 잰다
+    # (2-3-double-ml.py와 같은 정의: R² = 1 - SSE/SST)
+    kf = KFold(n_splits=5, shuffle=True, random_state=123)
+    y_oof = np.zeros(len(satisfaction))
+    t_oof = np.zeros(len(treatment))
+    for tr_idx, te_idx in kf.split(X):
+        om = GradientBoostingRegressor(n_estimators=100, max_depth=5, random_state=123)
+        om.fit(X[tr_idx], satisfaction[tr_idx])
+        y_oof[te_idx] = om.predict(X[te_idx])
+        pm = GradientBoostingClassifier(n_estimators=100, max_depth=5, random_state=123)
+        pm.fit(X[tr_idx], treatment[tr_idx])
+        t_oof[te_idx] = pm.predict_proba(X[te_idx])[:, 1]
+
+    outcome_r2 = 1 - np.sum((satisfaction - y_oof) ** 2) / np.sum((satisfaction - satisfaction.mean()) ** 2)
+    propensity_r2 = 1 - np.sum((treatment - t_oof) ** 2) / np.sum((treatment - treatment.mean()) ** 2)
+
+    # 중첩성: 두 집단의 성향점수 범위가 겹치는 구간 밖에 놓인 개체 비율
+    # (2-1-potential-outcomes.py와 같은 정의)
+    cs_min = max(t_oof[treatment == 1].min(), t_oof[treatment == 0].min())
+    cs_max = min(t_oof[treatment == 1].max(), t_oof[treatment == 0].max())
+    outside = int(((t_oof < cs_min) | (t_oof > cs_max)).sum())
+
+    cate_corr = np.corrcoef(cf_effect, true_cate)[0, 1]
+
+    print(f"   보조 모형 R² (결과 회귀) : {outcome_r2:.2f}")
+    print(f"   보조 모형 R² (성향점수)  : {propensity_r2:.2f}")
+    print(f"   중첩성 위반 비율         : {outside/len(X)*100:.1f}% ({outside}개)")
+    print(f"   추정 CATE와 참값의 상관  : {cate_corr:.2f}")
+
+    # 이질성이 어느 변수에서 오는지: 인과 포레스트의 변수 중요도
+    try:
+        importances = cf.feature_importances_
+        print("   이질성에 대한 변수 중요도:")
+        for name, val in sorted(zip(X_df.columns, importances), key=lambda p: -p[1]):
+            print(f"      {name:<12} : {val:.2f}")
+    except Exception as exc:
+        print(f"   변수 중요도를 계산하지 못했다: {exc}")
+
     # 시각화
     print("\n3. 시각화 생성 중...")
     visualize_econml_results(X_df, treatment, satisfaction, true_cate, true_ate,
