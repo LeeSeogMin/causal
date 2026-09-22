@@ -33,6 +33,28 @@ Double Machine Learning(DML)을 활용한 DID 추정
 - 조치 3: 부호를 계산해 '높게/낮게'를 고르고, 큰 것과 작은 것의 개수를 센다.
 """
 
+# == RESULTS LOG (auto): 콘솔 출력을 results/<스크립트명>.log 에도 저장 ==
+import sys as _sys
+from pathlib import Path as _Path
+
+_results_dir = _Path(__file__).resolve().parent.parent / "results"
+_results_dir.mkdir(exist_ok=True)
+
+class _Tee:
+    def __init__(self, *streams):
+        self._streams = streams
+    def write(self, data):
+        for _s in self._streams:
+            _s.write(data)
+            _s.flush()
+    def flush(self):
+        for _s in self._streams:
+            _s.flush()
+
+_sys.stdout = _Tee(_sys.stdout, open(_results_dir / (_Path(__file__).stem + ".log"), "w", encoding="utf-8"))
+# == /RESULTS LOG ==
+
+
 import numpy as np
 import pandas as pd
 import matplotlib

@@ -19,6 +19,28 @@
       학생이 손으로 따라 계산할 수 있게 했다. 순위표는 없앴다.
 """
 
+# == RESULTS LOG (auto): 콘솔 출력을 results/<스크립트명>.log 에도 저장 ==
+import sys as _sys
+from pathlib import Path as _Path
+
+_results_dir = _Path(__file__).resolve().parent.parent / "results"
+_results_dir.mkdir(exist_ok=True)
+
+class _Tee:
+    def __init__(self, *streams):
+        self._streams = streams
+    def write(self, data):
+        for _s in self._streams:
+            _s.write(data)
+            _s.flush()
+    def flush(self):
+        for _s in self._streams:
+            _s.flush()
+
+_sys.stdout = _Tee(_sys.stdout, open(_results_dir / (_Path(__file__).stem + ".log"), "w", encoding="utf-8"))
+# == /RESULTS LOG ==
+
+
 import os
 import warnings
 

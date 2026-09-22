@@ -15,6 +15,28 @@ Chapter 11 - 그래프 신경망과 조직 네트워크 분석
 5. 무작위 배치(spring_layout)의 seed는 이미 고정되어 있었다. 그대로 둔다.
 """
 
+# == RESULTS LOG (auto): 콘솔 출력을 results/<스크립트명>.log 에도 저장 ==
+import sys as _sys
+from pathlib import Path as _Path
+
+_results_dir = _Path(__file__).resolve().parent.parent / "results"
+_results_dir.mkdir(exist_ok=True)
+
+class _Tee:
+    def __init__(self, *streams):
+        self._streams = streams
+    def write(self, data):
+        for _s in self._streams:
+            _s.write(data)
+            _s.flush()
+    def flush(self):
+        for _s in self._streams:
+            _s.flush()
+
+_sys.stdout = _Tee(_sys.stdout, open(_results_dir / (_Path(__file__).stem + ".log"), "w", encoding="utf-8"))
+# == /RESULTS LOG ==
+
+
 import os
 import numpy as np
 import pandas as pd
