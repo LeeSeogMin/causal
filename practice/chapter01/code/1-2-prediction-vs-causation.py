@@ -14,7 +14,7 @@
 날짜: 2026-08-17
 """
 
-# == RESULTS LOG (auto): 콘솔 출력을 results/<스크립트명>.log 에도 저장 ==
+# == RESULTS LOG (auto): 콘솔 출력과 그림을 results/ 에 저장 ==
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -33,6 +33,25 @@ class _Tee:
             _s.flush()
 
 _sys.stdout = _Tee(_sys.stdout, open(_results_dir / (_Path(__file__).stem + ".log"), "w", encoding="utf-8"))
+
+# 그림 저장을 results/ 로 돌린다 (강의자료용 diagrams/ 경로는 그대로 둔다)
+try:
+    from matplotlib.figure import Figure as _Fig
+    if not getattr(_Fig, "_results_patched", False):
+        _orig_savefig = _Fig.savefig
+        def _savefig_to_results(self, fname, *a, **k):
+            try:
+                _p = _Path(fname)
+                if "diagrams" not in [s.lower() for s in _p.parts]:
+                    fname = _results_dir / _p.name
+                    print(f"[그림 저장 → {fname}]")
+            except TypeError:
+                pass
+            return _orig_savefig(self, fname, *a, **k)
+        _Fig.savefig = _savefig_to_results
+        _Fig._results_patched = True
+except ImportError:
+    pass
 # == /RESULTS LOG ==
 
 
