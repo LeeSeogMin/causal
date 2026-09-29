@@ -196,15 +196,12 @@ box(ax, 9.0, 4.9, 4.0, 1.0, '하나 → 사전 적합도(RMSPE)\n실습 2', BLUE
 arrow(ax, (4.3, 6.27), (2.9, 5.45))
 arrow(ax, (7.3, 6.27), (8.6, 5.45))
 
-box(ax, 1.5, 2.9, 2.4, 1.0, 'TWFE DID\n실습 1', GREEN, GREEN_E, fs=10.5)
-box(ax, 4.4, 2.9, 2.6, 1.0, 'DML로 공변량 조정\n실습 5', GREEN, GREEN_E, fs=10.5)
+box(ax, 2.5, 2.9, 2.4, 1.0, 'TWFE DID\n실습 1', GREEN, GREEN_E, fs=10.5)
 box(ax, 7.5, 2.9, 2.4, 1.0, 'SCM\n실습 2', GREEN, GREEN_E, fs=10.5)
 box(ax, 10.3, 2.9, 2.2, 1.0, 'SDID\n실습 4', GREEN, GREEN_E, fs=10.5)
 
-arrow(ax, (1.9, 4.4), (1.5, 3.45))
-ax.text(1.05, 3.95, '공변량\n적다', fontsize=9, ha='center')
-arrow(ax, (3.3, 4.4), (4.2, 3.45))
-ax.text(4.15, 3.95, '공변량\n많다', fontsize=9, ha='center')
+arrow(ax, (2.5, 4.4), (2.5, 3.45))
+ax.text(2.05, 3.95, '추세\n통과', fontsize=9, ha='center')
 arrow(ax, (8.4, 4.4), (7.7, 3.45))
 ax.text(7.55, 3.95, '적합\n좋다', fontsize=9, ha='center')
 arrow(ax, (9.7, 4.4), (10.3, 3.45))
@@ -212,8 +209,7 @@ ax.text(10.7, 3.95, '평행추세도\n쓰고 싶다', fontsize=9, ha='center')
 
 box(ax, 5.8, 1.15, 7.4, 0.95, '어느 경로든 마지막은 검증이다 (실습 3)',
     RED, RED_E, fs=11.5)
-arrow(ax, (1.5, 2.4), (3.4, 1.65))
-arrow(ax, (4.4, 2.4), (5.0, 1.65))
+arrow(ax, (2.5, 2.4), (4.0, 1.65))
 arrow(ax, (7.5, 2.4), (6.8, 1.65))
 arrow(ax, (10.3, 2.4), (8.4, 1.65))
 
