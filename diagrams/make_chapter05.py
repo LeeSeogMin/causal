@@ -3,15 +3,18 @@
 ==========================
 
 실행: python diagrams/make_chapter05.py
-출력: diagrams/5-1.png ~ 5-5.png
+출력: diagrams/5-1.png ~ 5-8.png
 
 - 5-1.png: Sharp RDD의 구조 (기준점 좌우 산점도와 수직 점프)
 - 5-2.png: Sharp와 Fuzzy의 차이 (기준점에서 처치 확률이 얼마나 뛰는가)
 - 5-3.png: 대역폭을 좁힐 때와 넓힐 때 무엇이 달라지는가
 - 5-4.png: 배정 변수 밀도로 조작을 찾는 방법 (McCrary 검정의 발상)
-- 5-5.png: RDD 분석 순서
+- 5-5.png: 공변량 균형 검정 (사전 변수가 기준점에서 이어지는가)
+- 5-6.png: 플라시보 기준점 검정 (가짜 기준점에서도 점프가 나오는가)
+- 5-7.png: 도넛홀 검정 (기준점 바로 옆을 빼고도 값이 버티는가)
+- 5-8.png: RDD 분석 순서
 
-주의: 5-1, 5-3, 5-4의 점과 곡선은 개념 설명용으로 이 파일 안에서 만든 값이다.
+주의: 5-1, 5-3, 5-4, 5-5, 5-6, 5-7의 점과 곡선은 개념 설명용으로 이 파일 안에서 만든 값이다.
       실습 결과 숫자가 아니므로 추정값을 표시하지 않는다.
 """
 
@@ -234,7 +237,168 @@ plt.savefig(os.path.join(OUT, '5-4.png'), dpi=200, bbox_inches='tight')
 plt.close()
 
 # ---------------------------------------------------------------------------
-# 5-5. RDD 분석 순서
+# 5-5. 공변량 균형 검정 — 처치가 바꿀 수 없는 변수를 결과 자리에 넣는다
+# ---------------------------------------------------------------------------
+rng = np.random.default_rng(31)
+xb = rng.uniform(30, 70, 300)
+age_ok = 42 + 0.06 * (xb - c) + rng.normal(0, 2.4, len(xb))
+age_bad = age_ok + 5.0 * (xb >= c)
+
+fig, axes = plt.subplots(1, 2, figsize=(11.6, 4.9), sharey=True)
+for ax, dat, title, msg, col in zip(
+        axes, [age_ok, age_bad],
+        ['(a) 통과: 기준점에서 이어진다', '(b) 불통과: 기준점에서 튄다'],
+        ['처치 전부터 양쪽의 나이가 같았다',
+         '기준점 위아래가 애초에 다른 사람들이다'],
+        [GREEN_E, RED_E]):
+    l, r = xb < c, xb >= c
+    ax.scatter(xb[l], dat[l], s=15, color=BLUE_E, alpha=0.40)
+    ax.scatter(xb[r], dat[r], s=15, color=RED_E, alpha=0.40)
+    gl = np.polyfit(xb[l], dat[l], 1)
+    gr = np.polyfit(xb[r], dat[r], 1)
+    xl = np.linspace(30, c, 40)
+    xr = np.linspace(c, 70, 40)
+    ax.plot(xl, np.polyval(gl, xl), color=BLUE_E, linewidth=3)
+    ax.plot(xr, np.polyval(gr, xr), color=RED_E, linewidth=3)
+    ax.axvline(c, color='#333333', linestyle='--', linewidth=2)
+    ax.set_xlim(30, 70)
+    ax.set_ylim(32, 58)
+    ax.set_xlabel('배정 변수 X (예: 시험 점수)', fontsize=11.5)
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.text(50, 55.6, msg, ha='center', fontsize=11, color=col, fontweight='bold')
+    ax.grid(alpha=0.2)
+
+axes[0].set_ylabel('처치 전에 측정한 나이\n(결과 자리에 넣었다)', fontsize=11.5)
+_gl = np.polyfit(xb[xb < c], age_bad[xb < c], 1)
+_gr = np.polyfit(xb[xb >= c], age_bad[xb >= c], 1)
+yl2, yr2 = np.polyval(_gl, c), np.polyval(_gr, c)
+axes[1].annotate('', xy=(c, yr2), xytext=(c, yl2),
+                 arrowprops=dict(arrowstyle='<->', color=YELLOW_E, linewidth=2.5))
+axes[1].text(c + 1.2, (yl2 + yr2) / 2, '나이가 튀었다\n→ 비교가 무너진다',
+             fontsize=11, color=RED_E, fontweight='bold', va='center')
+fig.suptitle('그림 5-5. 처치가 바꿀 수 없는 변수는 기준점에서 이어져야 한다',
+             fontsize=13.5, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT, '5-5.png'), dpi=200, bbox_inches='tight')
+plt.close()
+
+# ---------------------------------------------------------------------------
+# 5-6. 플라시보 기준점 검정 — 가짜 기준점에서도 점프가 나오는지 본다
+# ---------------------------------------------------------------------------
+pts = np.array([40, 45, 50, 55, 60])
+tick = ['가짜\n40', '가짜\n45', '진짜\n50', '가짜\n55', '가짜\n60']
+est_pass = np.array([0.25, -0.35, 2.90, 0.40, -0.55])
+est_fail = np.array([0.30, 2.05, 2.90, 1.90, 0.35])
+se_all = np.array([0.70, 0.66, 0.60, 0.68, 0.72])
+
+fig, axes = plt.subplots(1, 2, figsize=(11.6, 4.9), sharey=True)
+for ax, est, title, msg, col in zip(
+        axes, [est_pass, est_fail],
+        ['(a) 통과: 진짜에서만 점프가 있다', '(b) 불통과: 가짜에서도 점프가 있다'],
+        ['가짜 네 곳의 구간이 0을 지난다',
+         '곡선을 직선으로 끊은 탓에 생긴 점프다'],
+        [GREEN_E, RED_E]):
+    lo, hi = est - 1.96 * se_all, est + 1.96 * se_all
+    for i in range(len(pts)):
+        crosses = lo[i] <= 0 <= hi[i]
+        cc = GRAY_E if crosses else RED_E
+        if pts[i] == 50:
+            cc = YELLOW_E
+        ax.errorbar(i, est[i], yerr=1.96 * se_all[i], fmt='o', markersize=9,
+                    color=cc, ecolor=cc, elinewidth=2.5, capsize=7, capthick=2.5)
+    ax.axhline(0, color='#333333', linewidth=2)
+    ax.axvspan(1.5, 2.5, color=YELLOW, alpha=0.40, zorder=0)
+    ax.set_xticks(range(len(pts)))
+    ax.set_xticklabels(tick, fontsize=11)
+    ax.set_yticks([0])
+    ax.set_yticklabels(['0'], fontsize=11)
+    ax.set_xlim(-0.6, 4.6)
+    ax.set_ylim(-2.8, 5.4)
+    ax.set_xlabel('점프를 재 본 지점', fontsize=11.5)
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.text(2.0, 4.6, msg, ha='center', fontsize=11, color=col, fontweight='bold')
+    ax.grid(alpha=0.2, axis='x')
+
+axes[0].set_ylabel('추정한 점프와 95% 구간', fontsize=11.5, labelpad=16)
+axes[0].text(0.0, -2.35, '구간이 0을 지나면 "점프 없음"', fontsize=10.5, color=GRAY_E,
+             fontweight='bold')
+axes[1].text(2.0, -2.35, '빨간 두 곳은 가짜인데 구간이 0을 벗어났다', ha='center',
+             fontsize=10.5, color=RED_E, fontweight='bold')
+fig.suptitle('그림 5-6. 가짜 기준점에서도 점프가 나오면 처치효과가 아니다',
+             fontsize=13.5, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT, '5-6.png'), dpi=200, bbox_inches='tight')
+plt.close()
+
+# ---------------------------------------------------------------------------
+# 5-7. 도넛홀 검정 — 기준점 바로 옆을 빼고 다시 추정한다
+# ---------------------------------------------------------------------------
+rng = np.random.default_rng(45)
+xd = rng.uniform(30, 70, 300)
+yd = 20 + 0.30 * (xd - c) + 3.0 * (xd >= c) + rng.normal(0, 1.6, len(xd))
+
+fig, axes = plt.subplots(1, 2, figsize=(11.8, 4.9))
+
+ax = axes[0]
+hole = 3.0
+inside = np.abs(xd - c) <= hole
+ax.axvspan(c - hole, c + hole, color=GRAY, alpha=0.85, zorder=0)
+ax.scatter(xd[(xd < c) & ~inside], yd[(xd < c) & ~inside], s=15, color=BLUE_E, alpha=0.45)
+ax.scatter(xd[(xd >= c) & ~inside], yd[(xd >= c) & ~inside], s=15, color=RED_E, alpha=0.45)
+ax.scatter(xd[inside], yd[inside], s=28, facecolors='none', edgecolors=GRAY_E,
+           linewidths=1.5)
+ax.axvline(c, color='#333333', linestyle='--', linewidth=2)
+ax.text(c, 11.4, '이 구간을 빼고\n다시 계산한다', ha='center', fontsize=11,
+        color=GRAY_E, fontweight='bold',
+        bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor=GRAY_E,
+                  alpha=0.92))
+ax.annotate('점수를 조정한 사람이 있다면\n여기 몰려 있다', xy=(c + 2.4, 23.4),
+            xytext=(58.0, 15.8), ha='center', fontsize=10.5, color=GRAY_E,
+            fontweight='bold',
+            bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='none',
+                      alpha=0.92),
+            arrowprops=dict(arrowstyle='->', color=GRAY_E, linewidth=2))
+ax.set_xlim(30, 70)
+ax.set_ylim(10, 32)
+ax.set_xlabel('배정 변수 X', fontsize=11.5)
+ax.set_ylabel('결과 변수 Y', fontsize=11.5)
+ax.set_title('(a) 기준점 바로 옆을 비운다', fontsize=12, fontweight='bold')
+ax.grid(alpha=0.2)
+
+ax = axes[1]
+widths = ['제외\n없음', '±0.5', '±1.0', '±1.5']
+est_d = np.array([2.94, 2.72, 2.62, 2.84])
+se_d = np.array([0.60, 0.72, 0.84, 0.96])
+ax.axhspan(est_d[0] - 1.96 * se_d[0], est_d[0] + 1.96 * se_d[0],
+           color=YELLOW, alpha=0.30, zorder=0)
+for i in range(len(widths)):
+    cc = YELLOW_E if i == 0 else BLUE_E
+    ax.errorbar(i, est_d[i], yerr=1.96 * se_d[i], fmt='o', markersize=9,
+                color=cc, ecolor=cc, elinewidth=2.5, capsize=7, capthick=2.5)
+ax.axhline(0, color='#333333', linewidth=2)
+ax.set_xticks(range(len(widths)))
+ax.set_xticklabels(widths, fontsize=11)
+ax.set_yticks([0])
+ax.set_yticklabels(['0'], fontsize=11)
+ax.set_xlim(-0.6, 3.6)
+ax.set_ylim(-1.2, 6.4)
+ax.set_xlabel('비운 구간의 폭', fontsize=11.5)
+ax.set_ylabel('추정한 점프와 95% 구간', fontsize=11.5, labelpad=16)
+ax.set_title('(b) 통과: 값이 버티고 구간이 겹친다', fontsize=12, fontweight='bold')
+ax.text(1.5, 5.7, '쓰는 사람이 줄어 구간은 넓어진다', ha='center', fontsize=10.5,
+        color=GRAY_E, fontweight='bold')
+ax.text(1.5, -0.85, '폭을 넓힐수록 값이 한 방향으로 계속 내려가면 불통과',
+        ha='center', fontsize=10.5, color=RED_E, fontweight='bold')
+ax.grid(alpha=0.2, axis='x')
+
+fig.suptitle('그림 5-7. 기준점 바로 옆을 빼고도 값이 버티는지 본다',
+             fontsize=13.5, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT, '5-7.png'), dpi=200, bbox_inches='tight')
+plt.close()
+
+# ---------------------------------------------------------------------------
+# 5-8. RDD 분석 순서
 # ---------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(10.6, 7.0))
 ax.set_xlim(0, 11.4); ax.set_ylim(0, 8.0); ax.axis('off')
@@ -266,12 +430,13 @@ ax.text(2.0, 1.85, '추정한 뒤 반드시\n되짚어 본다', fontsize=10, ha=
 
 ax.text(5.7, 0.30, '②와 ⑤를 건너뛴 추정값은 보고서에 싣지 않는다',
         ha='center', fontsize=11.5, color=RED_E, fontweight='bold')
-ax.set_title('그림 5-5. RDD 분석 순서', fontsize=13.5, fontweight='bold', pad=10)
+ax.set_title('그림 5-8. RDD 분석 순서', fontsize=13.5, fontweight='bold', pad=10)
 plt.tight_layout()
-plt.savefig(os.path.join(OUT, '5-5.png'), dpi=200, bbox_inches='tight')
+plt.savefig(os.path.join(OUT, '5-8.png'), dpi=200, bbox_inches='tight')
 plt.close()
 
 print("생성 완료:")
-for f in ['5-1.png', '5-2.png', '5-3.png', '5-4.png', '5-5.png']:
+for f in ['5-1.png', '5-2.png', '5-3.png', '5-4.png', '5-5.png',
+          '5-6.png', '5-7.png', '5-8.png']:
     p = os.path.join(OUT, f)
     print(f"  {f}  ({os.path.getsize(p)/1024:.0f} KB)")
