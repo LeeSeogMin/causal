@@ -5,7 +5,7 @@
 실행: python diagrams/make_chapter06.py
 출력: diagrams/6-1.png ~ 6-4.png
 
-- 6-1.png: 내생성 구조 (숨은 원인 U가 D와 Y를 동시에 움직임)
+- 6-1.png: 내생성이 생기는 세 경로 (생략변수 / 측정오차 / 역인과)
 - 6-2.png: 도구변수의 3조건
 - 6-3.png: 2SLS 두 단계 흐름
 - 6-4.png: 방법 선택 흐름
@@ -55,22 +55,66 @@ def canvas(w=9, h=4.6, xlim=(0, 10), ylim=(0, 5)):
 
 
 # ---------------------------------------------------------------------------
-# 6-1. 내생성 구조
+# 6-1. 내생성이 생기는 세 경로
 # ---------------------------------------------------------------------------
-fig, ax = canvas()
-box(ax, 2.2, 1.6, 2.6, 1.0, 'D: 처치\n(헬스장 등록)', BLUE, BLUE_E)
-box(ax, 7.8, 1.6, 2.6, 1.0, 'Y: 결과\n(체중 변화)', GREEN, GREEN_E)
-box(ax, 5.0, 4.0, 3.4, 1.0, 'U: 관측 안 되는 원인\n(건강 관심도)', RED, RED_E)
+def curved(ax, p1, p2, rad, color, label=None, lx=0.0, ly=0.0, lfs=9):
+    ax.add_patch(FancyArrowPatch(p1, p2, arrowstyle='-|>', mutation_scale=16,
+                                 color=color, linewidth=2, shrinkA=6, shrinkB=6,
+                                 connectionstyle='arc3,rad=%s' % rad))
+    if label:
+        mx, my = (p1[0] + p2[0]) / 2 + lx, (p1[1] + p2[1]) / 2 + ly
+        ax.text(mx, my, label, ha='center', va='center',
+                fontsize=lfs, color=color, fontweight='bold')
 
-arrow(ax, (3.5, 1.6), (6.5, 1.6), label='알고 싶은 효과', ly=0.32, lfs=10)
-arrow(ax, (4.0, 3.7), (2.6, 2.2), color=RED_E)
-arrow(ax, (6.0, 3.7), (7.4, 2.2), color=RED_E)
 
-ax.text(5.0, 0.45,
-        'U에서 화살표가 두 개 나가는 것이 문제다.\n'
-        'D와 Y가 같이 움직여도 D 때문인지 U 때문인지 가를 수 없다.',
-        ha='center', va='center', fontsize=10.5, color='#c0392b')
-ax.set_title('그림 6-1. 내생성의 구조', fontsize=13, fontweight='bold', pad=8)
+fig, axes = plt.subplots(1, 3, figsize=(14, 4.8))
+for a in axes:
+    a.set_xlim(0, 10); a.set_ylim(0, 10); a.axis('off')
+
+# (1) 생략변수
+a = axes[0]
+box(a, 5.0, 8.5, 6.0, 1.6, 'U: 관측 안 되는 원인\n(건강 관심도)', RED, RED_E, fs=9.5)
+box(a, 2.0, 4.0, 3.4, 1.6, 'D: 처치\n(헬스장 등록)', BLUE, BLUE_E, fs=9.5)
+box(a, 8.0, 4.0, 3.4, 1.6, 'Y: 결과\n(체중 변화)', GREEN, GREEN_E, fs=9.5)
+arrow(a, (4.0, 7.7), (2.4, 4.9), color=RED_E)
+arrow(a, (6.0, 7.7), (7.6, 4.9), color=RED_E)
+arrow(a, (3.8, 4.0), (6.2, 4.0))
+a.text(5.0, 5.4, '알고 싶은 효과', ha='center', va='center', fontsize=9)
+a.set_title('① 생략변수', fontsize=12, fontweight='bold', pad=6)
+a.text(5.0, 1.6, 'U가 D와 Y를 함께 움직인다', ha='center', va='center',
+       fontsize=9.5, color='#c0392b')
+
+# (2) 측정오차
+a = axes[1]
+box(a, 2.6, 8.5, 4.4, 1.6, 'D*: 실제 처치\n(실제 운동시간)', GRAY, GRAY_E, fs=9.5)
+box(a, 7.8, 6.3, 3.8, 1.6, 'Y: 결과\n(체중 변화)', GREEN, GREEN_E, fs=9.5)
+box(a, 2.6, 4.0, 4.4, 1.6, 'D: 잰 값\n(설문 응답)', BLUE, BLUE_E, fs=9.5)
+arrow(a, (4.9, 8.1), (6.0, 6.9))
+a.text(6.6, 8.3, '알고 싶은 효과', ha='center', va='center', fontsize=9)
+arrow(a, (2.6, 7.7), (2.6, 4.8), color=RED_E)
+a.text(3.1, 6.3, '잴 때 오차가 섞인다', ha='left', va='center',
+       fontsize=9, color=RED_E, fontweight='bold')
+a.set_title('② 측정오차', fontsize=12, fontweight='bold', pad=6)
+a.text(5.0, 1.6, '회귀에는 실제 값이 아니라 아래 칸을 넣는다', ha='center', va='center',
+       fontsize=9.5, color='#c0392b')
+
+# (3) 역인과
+a = axes[2]
+box(a, 1.9, 6.0, 3.2, 1.6, 'D: 처치\n(가격)', BLUE, BLUE_E, fs=9.5)
+box(a, 8.1, 6.0, 3.2, 1.6, 'Y: 결과\n(손님 수)', GREEN, GREEN_E, fs=9.5)
+curved(a, (3.5, 6.8), (6.5, 6.8), 0.35, '#333333')
+a.text(5.0, 8.6, '알고 싶은 효과', ha='center', va='center', fontsize=9)
+curved(a, (6.5, 5.2), (3.5, 5.2), 0.35, RED_E)
+a.text(5.0, 3.4, 'Y가 거꾸로 D를 정한다', ha='center', va='center',
+       fontsize=9, color=RED_E, fontweight='bold')
+a.set_title('③ 역인과', fontsize=12, fontweight='bold', pad=6)
+a.text(5.0, 1.6, '화살표가 양쪽으로 간다', ha='center', va='center',
+       fontsize=9.5, color='#c0392b')
+
+fig.suptitle('그림 6-1. 내생성이 생기는 세 경로', fontsize=13.5, fontweight='bold', y=1.03)
+fig.text(0.5, -0.04,
+         '세 경로 모두 D를 회귀식의 오차와 상관되게 만든다 — 이 상태가 내생성이다.',
+         ha='center', va='center', fontsize=11, fontweight='bold', color='#c0392b')
 plt.tight_layout()
 plt.savefig(os.path.join(OUT, '6-1.png'), dpi=200, bbox_inches='tight')
 plt.close()
