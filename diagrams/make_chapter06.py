@@ -3,12 +3,13 @@
 ==========================
 
 실행: python diagrams/make_chapter06.py
-출력: diagrams/6-1.png ~ 6-4.png
+출력: diagrams/6-1.png ~ 6-5.png
 
 - 6-1.png: 내생성이 생기는 세 경로 (생략변수 / 측정오차 / 역인과)
 - 6-2.png: 도구변수의 3조건
 - 6-3.png: 2SLS 두 단계 흐름
-- 6-4.png: 방법 선택 흐름
+- 6-4.png: 축약형 ÷ 1단계 나눗셈
+- 6-5.png: 방법 선택 흐름
 """
 
 import os
@@ -17,7 +18,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
-plt.rcParams['font.family'] = 'Malgun Gothic'
+plt.rcParams['font.family'] = ['Malgun Gothic', 'Apple SD Gothic Neo', 'AppleGothic']
 plt.rcParams['axes.unicode_minus'] = False
 
 OUT = os.path.dirname(os.path.abspath(__file__))
@@ -176,6 +177,31 @@ plt.savefig(os.path.join(OUT, '6-3.png'), dpi=200, bbox_inches='tight')
 plt.close()
 
 # ---------------------------------------------------------------------------
+# 6-4. 축약형 ÷ 1단계 — 2SLS와 같은 답
+# ---------------------------------------------------------------------------
+fig, ax = canvas(w=10.5, h=4.4, xlim=(0, 12), ylim=(0, 5))
+box(ax, 1.2, 2.4, 1.4, 1.2, 'Z', GREEN, GREEN_E, fs=13)
+box(ax, 4.2, 3.7, 2.6, 1.1, '1단계 회귀\nD ~ Z + X', YELLOW, YELLOW_E, fs=10.5)
+box(ax, 4.2, 1.1, 2.6, 1.1, '축약형 회귀\nY ~ Z + X', BLUE, BLUE_E, fs=10.5)
+box(ax, 7.3, 3.7, 2.3, 1.1, '0.6096\n분모 (Z → D)', YELLOW, YELLOW_E, fs=10.5)
+box(ax, 7.3, 1.1, 2.3, 1.1, '2.0438\n분자 (Z → Y)', BLUE, BLUE_E, fs=10.5)
+box(ax, 10.5, 2.4, 2.6, 1.4, '2.0438 ÷ 0.6096\n= 3.3528', GREEN, GREEN_E, fs=11)
+
+arrow(ax, (1.9, 2.8), (2.9, 3.6))
+arrow(ax, (1.9, 2.0), (2.9, 1.2))
+arrow(ax, (5.5, 3.7), (6.1, 3.7))
+arrow(ax, (5.5, 1.1), (6.1, 1.1))
+arrow(ax, (8.5, 3.5), (9.3, 2.8))
+arrow(ax, (8.5, 1.3), (9.3, 2.0))
+
+ax.text(6.0, 0.15, '2SLS가 내놓은 3.353과 같은 값이다 — 같은 추정량을 다른 순서로 계산했다',
+        ha='center', fontsize=10.5, color='#333333')
+ax.set_title('그림 6-4. 축약형 ÷ 1단계 — 2SLS와 같은 답', fontsize=13, fontweight='bold', pad=8)
+plt.tight_layout()
+plt.savefig(os.path.join(OUT, '6-4.png'), dpi=200, bbox_inches='tight')
+plt.close()
+
+# ---------------------------------------------------------------------------
 # 6-4. 방법 선택 흐름
 # ---------------------------------------------------------------------------
 fig, ax = canvas(w=10.5, h=6.6, xlim=(0, 11.4), ylim=(0, 7.2))
@@ -205,13 +231,13 @@ arrow(ax, (9.6, 2.32), (7.4, 1.30))
 arrow(ax, (5.9, 2.32), (5.7, 1.28))
 arrow(ax, (1.9, 2.32), (3.6, 1.30))
 
-ax.set_title('그림 6-4. 어떤 방법을 쓸지 정하는 순서',
+ax.set_title('그림 6-5. 어떤 방법을 쓸지 정하는 순서',
              fontsize=13, fontweight='bold', pad=8)
 plt.tight_layout()
-plt.savefig(os.path.join(OUT, '6-4.png'), dpi=200, bbox_inches='tight')
+plt.savefig(os.path.join(OUT, '6-5.png'), dpi=200, bbox_inches='tight')
 plt.close()
 
 print("생성 완료:")
-for f in ['6-1.png', '6-2.png', '6-3.png', '6-4.png']:
+for f in ['6-1.png', '6-2.png', '6-3.png', '6-4.png', '6-5.png']:
     p = os.path.join(OUT, f)
     print(f"  {f}  ({os.path.getsize(p)/1024:.0f} KB)")
