@@ -1,5 +1,4 @@
 docs/
-*.png
 .tmp/
 results/
 .gstack/
