@@ -4,3 +4,5 @@ results/
 .gstack/
 
 exam/
+tmp/**/*.png
+practice/**/*.png
