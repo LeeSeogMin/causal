@@ -6,3 +6,7 @@ results/
 exam/
 tmp/**/*.png
 practice/**/*.png
+
+# 과제 (공개 전까지 잠시 제외)
+lecture/ch09-과제.md
+lecture/ch09-과제.pdf
