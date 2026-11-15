@@ -7,3 +7,4 @@ exam/
 tmp/**/*.png
 practice/**/*.png
 
+__pycache__/
