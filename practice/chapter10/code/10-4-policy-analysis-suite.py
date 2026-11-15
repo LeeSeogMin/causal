@@ -3,7 +3,8 @@
 ===========================
 
 목적: 실전 딥러닝 정책 분석 기법 통합
-- 문서 분류, 감정 분석, 유사도 분석, 요약, QA
+- 문서 분류, 유사도 분석, 요약, QA
+- 감성 분석은 10-4b-sentiment-variable.py로 옮겼다 (2026-11-15)
 
 저자: AI 기반 정책분석방법론
 날짜: 2025-11-20
@@ -109,55 +110,8 @@ accuracy = accuracy_score(y_test, y_pred)
 print(f"분류 정확도: {accuracy:.1%}")
 print(f"F1 Score: {classification_report(y_test, y_pred, output_dict=True)['weighted avg']['f1-score']:.3f}")
 
-# 3. 시민 피드백 감정 분석
-print("\n[3단계] 시민 피드백 감정 분석")
-print("-" * 80)
-
-feedbacks = [
-    "이 정책은 정말 훌륭합니다",
-    "정책 효과가 의문입니다",
-    "좋은 방향이지만 실현 가능성이 낮아요",
-    "적극 찬성합니다",
-    "반대합니다. 비현실적입니다",
-    "괜찮은 정책인 것 같습니다",
-    "전혀 도움이 되지 않습니다",
-    "기대됩니다",
-    "우려스럽습니다",
-    "나쁘지 않네요"
-]
-
-# 간단한 감정 분석 (키워드 기반)
-positive_words = ['훌륭', '좋은', '찬성', '괜찮', '기대', '않네요']
-negative_words = ['의문', '반대', '비현실', '우려', '않습니다']
-
-sentiments = []
-for feedback in feedbacks:
-    pos_count = sum(1 for word in positive_words if word in feedback)
-    neg_count = sum(1 for word in negative_words if word in feedback)
-    
-    if pos_count > neg_count:
-        sentiment = '긍정'
-    elif neg_count > pos_count:
-        sentiment = '부정'
-    else:
-        sentiment = '중립'
-    
-    sentiments.append(sentiment)
-
-sentiment_df = pd.DataFrame({
-    '피드백': feedbacks,
-    '감정': sentiments
-})
-
-print(sentiment_df.to_string(index=False))
-
-sentiment_counts = pd.Series(sentiments).value_counts()
-print(f"\n감정 분포:")
-for sent, count in sentiment_counts.items():
-    print(f"  {sent}: {count}개 ({count/len(feedbacks):.1%})")
-
-# 4. 정책 간 의미적 유사도 분석
-print("\n[4단계] 정책 간 의미적 유사도 분석")
+# 3. 정책 간 의미적 유사도 분석
+print("\n[3단계] 정책 간 의미적 유사도 분석")
 print("-" * 80)
 
 # 일부 정책 선택
@@ -178,8 +132,8 @@ for i in range(len(sample_labels)):
         if sim > 0.1:  # 임계값 이상인 경우만 출력
             print(f"  {sample_labels[i]} <-> {sample_labels[j]}: {sim:.3f}")
 
-# 5. 자동 요약 (추출적 요약)
-print("\n[5단계] 정책 문서 자동 요약")
+# 4. 자동 요약 (추출적 요약)
+print("\n[4단계] 정책 문서 자동 요약")
 print("-" * 80)
 
 long_policy = """
@@ -210,8 +164,8 @@ print(long_policy)
 print(f"\n요약 (2개 문장):")
 print(summary)
 
-# 6. 질의응답 (QA) 시스템
-print("\n[6단계] 정책 문서 질의응답")
+# 5. 질의응답 (QA) 시스템
+print("\n[5단계] 정책 문서 질의응답")
 print("-" * 80)
 
 context = "2025년 디지털 뉴딜 정책의 예산은 5조 원이며, 3월부터 시행된다."
@@ -243,17 +197,13 @@ for q in questions:
     else:
         print(f"A: 답변을 찾을 수 없습니다.")
 
-# 7. 통합 분석 결과
+# 6. 통합 분석 결과
 print("\n" + "=" * 80)
 print("정책 분석 종합 결과")
 print("=" * 80)
 
 results_summary = f"""
 ✓ 정책 문서 분류: {len(df_policies)}개 문서, 정확도 {accuracy:.1%}
-✓ 감정 분석: {len(feedbacks)}개 피드백 분석
-  - 긍정: {sentiment_counts.get('긍정', 0)}개
-  - 부정: {sentiment_counts.get('부정', 0)}개
-  - 중립: {sentiment_counts.get('중립', 0)}개
 ✓ 유사도 분석: 정책 간 중복 가능성 탐지
 ✓ 자동 요약: 긴 문서를 핵심 문장으로 압축
 ✓ 질의응답: 정책 정보 자동 추출
@@ -266,7 +216,6 @@ print("  1) 신규 정책 제안서 → 자동 분류 → 담당 부서 배정")
 print("  2) 유사도 분석 → 관련 정책 발견 → 통합 검토")
 print("  3) 요약 모델 → 핵심 내용 추출 → 보고서 작성")
 print("  4) QA 시스템 → 정보 검색 → 의사결정 지원")
-print("  5) 시민 의견 수집 → 감정 분석 → 정책 피드백")
 
 print("\n=" * 80)
 print("주의: 본 구현은 교육 목적 간소화 버전")
