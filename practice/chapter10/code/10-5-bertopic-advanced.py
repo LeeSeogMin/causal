@@ -9,6 +9,15 @@
 
 저자: AI 기반 정책분석방법론
 날짜: 2025-11-20
+
+수정 이력
+  2026-11-18  단어를 세기 전에 형태소 분석(kiwipiepy)으로 명사만 뽑는다.
+    - 문제: 문장을 띄어쓰기로만 잘라 "발전을", "추진한다"처럼 조사·어미가
+      붙은 어절을 그대로 세었다.
+    - 필요 패키지: pip install kiwipiepy
+  2026-11-18  3단계에 정답 주제와의 교차표, 4단계에 달별 문서 수(비중의 분모)를 출력한다.
+  2026-11-18  8단계 "동적 토픽 모델링 인사이트"를 지웠다. 계산하지 않고 코드에 직접 적어 둔
+    수치("AI 관련 키워드 8개 → 15개", "'디지털 전환' 토픽 비중 18% → 22%" 등)였다.
 """
 
 # == RESULTS LOG (auto): 콘솔 출력과 그림을 results/ 에 저장 ==
@@ -56,6 +65,7 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.cluster import KMeans
+from kiwipiepy import Kiwi
 from collections import Counter
 
 np.random.seed(42)
@@ -113,9 +123,22 @@ print(f"기간: {df['timestamp'].min()} ~ {df['timestamp'].max()}")
 print("\n[2단계] 토픽 모델링 (간소화 버전)")
 print("-" * 80)
 
-# TF-IDF 기반 벡터화
+# 형태소 분석: 문장을 형태소로 나누고 명사(일반명사 NNG, 고유명사 NNP, 영문 SL)만 남긴다
+kiwi = Kiwi()
+NOUN_TAGS = {'NNG', 'NNP', 'SL'}
+
+
+def extract_nouns(text):
+    return ' '.join(t.form for t in kiwi.tokenize(text) if t.tag in NOUN_TAGS)
+
+
+df['nouns'] = df['document'].apply(extract_nouns)
+print(f"원문    : {df['document'][0]}")
+print(f"명사만  : {df['nouns'][0]}")
+
+# 명사 빈도 기반 벡터화
 vectorizer = CountVectorizer(max_features=50, ngram_range=(1, 2))
-doc_vectors = vectorizer.fit_transform(df['document'])
+doc_vectors = vectorizer.fit_transform(df['nouns'])
 
 # K-Means 클러스터링
 n_topics = 8
@@ -144,6 +167,13 @@ for topic_id in range(n_topics):
     
     print(f"토픽 {topic_id + 1} ({doc_count}개 문서): {', '.join(keywords)}")
 
+# 정답 대조: 문서를 만들 때 정한 주제(true_topic)와 묶음 번호를 교차표로 센다
+print("\n정답 주제와 대조 (행: 정답 주제, 열: 토픽 번호, 칸: 문서 수):")
+check_table = pd.crosstab(df['true_topic'], df['predicted_topic'] + 1)
+print(check_table.to_string())
+match_count = check_table.max(axis=0).sum()  # 토픽마다 가장 많은 정답 주제의 문서 수를 더한다
+print(f"일치 문서: {match_count} / {len(df)} ({match_count / len(df):.1%})")
+
 # 4. 시간적 토픽 변화
 print("\n[4단계] 시간적 토픽 변화 추이")
 print("-" * 80)
@@ -151,6 +181,10 @@ print("-" * 80)
 # 시기별 그룹화
 df['year_month'] = df['timestamp']
 time_topic_dist = df.groupby(['year_month', 'predicted_topic']).size().unstack(fill_value=0)
+
+# 비중의 분모: 달마다 문서가 몇 건인지 먼저 확인한다
+month_counts = time_topic_dist.sum(axis=1)
+print(f"달 수: {len(month_counts)}, 달별 문서 수: 최소 {month_counts.min()}건 ~ 최대 {month_counts.max()}건")
 
 # 주요 시기 비교
 start_period = '2024.01'
@@ -250,21 +284,7 @@ comparison = pd.DataFrame({
 
 print(comparison.to_string(index=False))
 
-# 8. 동적 토픽 모델링 결과
-print("\n[8단계] 동적 토픽 모델링 인사이트")
-print("-" * 80)
-
-insights = """
-✓ AI 관련 키워드 급증: 2024.01 (8개) → 2025.10 (15개)
-✓ '디지털 전환' 토픽 비중: 18% → 22% (상승)
-✓ '탄소 중립' 토픽 비중: 15% → 18% (상승)
-✓ '교육 혁신' 내 'AI 교육' 키워드: 28% → 47% (상승)
-✓ 정책 의제가 디지털 전환과 탄소 중립으로 이동 중
-"""
-
-print(insights)
-
-# 9. 최종 요약
+# 8. 최종 요약
 print("\n" + "=" * 80)
 print("BERTopic 토픽 모델링 최종 결과")
 print("=" * 80)

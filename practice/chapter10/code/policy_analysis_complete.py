@@ -3,10 +3,21 @@
 ===================================
 
 목적: 전체 정책 분석 파이프라인 통합 실행
-- 데이터 준비 → 분류 → 감정 분석 → 토픽 모델링 → 결과 해석
+- 데이터 준비 → 분류 → 토픽 모델링 → 연도별 토픽 비중 → 결과 요약
 
 저자: AI 기반 정책분석방법론
 날짜: 2025-11-20
+
+수정 이력
+  2026-11-18  계산하지 않고 코드에 직접 적어 둔 수치를 모두 지웠다.
+    - 지운 것: 학습 시간 "8분 32초 (시뮬레이션)", 감정 분석 단계 전체
+      (가상 피드백의 라벨을 그대로 세고, 카테고리별 긍정 비율 58%·55% 등을 적어 둠),
+      시간 변화 단계의 토픽 비중(12% → 18% 등), 시사점·종합의 문구
+      ("기존 TF-IDF 65% 대비", "20%p 향상", "디지털+교육 융합" 등)
+    - 감성 분석은 10-4b-sentiment-variable.py에서 다룬다.
+    - 토픽 모델링은 형태소 분석(kiwipiepy)으로 명사만 뽑은 뒤 묶는다.
+    - 시간 변화는 데이터의 수집일 열로 연도별 토픽 비중을 계산한다.
+    - 필요 패키지: pip install kiwipiepy
 """
 
 # == RESULTS LOG (auto): 콘솔 출력과 그림을 results/ 에 저장 ==
@@ -58,6 +69,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.cluster import KMeans
+from kiwipiepy import Kiwi
 from collections import Counter
 import matplotlib.pyplot as plt
 
@@ -75,10 +87,10 @@ print("=" * 90)
 data_path = Path(__file__).resolve().parents[1] / "data" / "policy_sample_data.csv"
 if data_path.exists():
     df = pd.read_csv(data_path)
-    expected_cols = {"정책문서", "카테고리"}
-    if not expected_cols.issubset(set(df.columns)):
-        raise ValueError(f"Expected columns {sorted(expected_cols)} in {data_path}")
-    df = df[list(expected_cols)].dropna()
+    expected_cols = ["정책문서", "카테고리", "수집일"]
+    if not set(expected_cols).issubset(set(df.columns)):
+        raise ValueError(f"Expected columns {expected_cols} in {data_path}")
+    df = df[expected_cols].dropna()
     categories = sorted(df["카테고리"].unique())
     print(f"데이터 로드: {data_path}")
 else:
@@ -125,7 +137,7 @@ for cat, count in category_dist.items():
 
 # ===== 2. BERT 기반 정책 분류 =====
 print("\n" + "=" * 90)
-print("[2단계] BERT 기반 정책 분류 (간소화)")
+print("[2단계] 문서 분류 (TF-IDF + 로지스틱 회귀 분류기)")
 print("=" * 90)
 
 # Train/Test 분할
@@ -156,7 +168,6 @@ print(f"정확도 (Accuracy): {accuracy:.1%}")
 print(f"정밀도 (Precision): {precision:.3f}")
 print(f"재현율 (Recall): {recall:.3f}")
 print(f"F1 Score: {f1:.3f}")
-print(f"학습 시간: 8분 32초 (시뮬레이션)")
 
 # 혼동 행렬 분석
 print("\n오분류 사례:")
@@ -169,192 +180,91 @@ error_counter = Counter(errors)
 for (true_cat, pred_cat), count in error_counter.most_common(3):
     print(f"  {true_cat} → {pred_cat}: {count}건")
 
-# ===== 3. 감정 분석 =====
+# ===== 3. 토픽 모델링 =====
+# 감성 분석은 10-4b-sentiment-variable.py에서 다룬다 (2026-11-18 이 스크립트에서 삭제)
 print("\n" + "=" * 90)
-print("[3단계] 시민 피드백 감정 분석")
+print("[3단계] 토픽 모델링 (형태소 분석 + TF-IDF + K-평균 군집)")
 print("=" * 90)
 
-feedbacks = []
-feedback_labels = []
+# 형태소 분석: 명사(일반명사 NNG, 고유명사 NNP, 영문 SL)만 남긴다
+kiwi = Kiwi()
+NOUN_TAGS = {'NNG', 'NNP', 'SL'}
 
-# 가상 피드백 생성
-positive_templates = [
-    "{cat} 정책은 훌륭합니다",
-    "{cat}에 대한 정책 방향이 좋습니다",
-    "{cat} 정책 적극 찬성합니다"
-]
-negative_templates = [
-    "{cat} 정책 효과가 의문입니다",
-    "{cat}에 대한 정책이 우려됩니다",
-    "{cat} 정책 반대합니다"
-]
-neutral_templates = [
-    "{cat} 정책 검토가 필요합니다",
-    "{cat}에 대한 정책 관찰 중입니다"
-]
 
-for cat in categories[:5]:  # 일부 카테고리만
-    feedbacks.append(np.random.choice(positive_templates).format(cat=cat))
-    feedback_labels.append('긍정')
-    feedbacks.append(np.random.choice(negative_templates).format(cat=cat))
-    feedback_labels.append('부정')
+def extract_nouns(text):
+    return ' '.join(t.form for t in kiwi.tokenize(text) if t.tag in NOUN_TAGS)
 
-# 감정 분석 결과
-sentiment_dist = Counter(feedback_labels)
-total_feedback = len(feedbacks)
 
-print(f"총 피드백 수: {total_feedback}건")
-print(f"\n감정 분포:")
-for sentiment, count in sentiment_dist.items():
-    pct = count / total_feedback * 100
-    print(f"  {sentiment}: {count}건 ({pct:.0f}%)")
+df['명사'] = df['정책문서'].apply(extract_nouns)
 
-# 카테고리별 감정
-print("\n카테고리별 긍정 비율:")
-cat_sentiments = {'디지털정책': 58, '환경정책': 55, '보건정책': 48, '고용정책': 52}
-for cat, pos_pct in cat_sentiments.items():
-    print(f"  {cat}: {pos_pct}%")
-
-# ===== 4. BERTopic 토픽 모델링 =====
-print("\n" + "=" * 90)
-print("[4단계] BERTopic 토픽 모델링")
-print("=" * 90)
-
-# 간소화된 토픽 모델링
 vec = TfidfVectorizer(max_features=100)
-doc_vecs = vec.fit_transform(df['정책문서'])
+doc_vecs = vec.fit_transform(df['명사'])
 
 n_topics = 8
 kmeans = KMeans(n_clusters=n_topics, random_state=42)
-topic_labels = kmeans.fit_transform(doc_vecs)
+df['토픽'] = kmeans.fit_predict(doc_vecs) + 1
 
-print(f"식별된 토픽 수: {n_topics}개")
+print(f"묶음 수(사람이 정함): {n_topics}개")
 
-# 토픽별 키워드
 feature_names = vec.get_feature_names_out()
 topic_keywords = {}
-
 for topic_id in range(n_topics):
     center = kmeans.cluster_centers_[topic_id]
     top_idx = center.argsort()[-4:][::-1]
     keywords = [feature_names[idx] for idx in top_idx]
-    doc_count = (kmeans.labels_ == topic_id).sum()
-    topic_keywords[topic_id] = keywords
-    
-    # 토픽 명명 (간단히)
-    topic_names = {
-        0: '디지털 전환',
-        1: '탄소 중립',
-        2: '사회 안전망',
-        3: '교육 혁신'
-    }
-    name = topic_names.get(topic_id, f'토픽 {topic_id+1}')
-    
-    print(f"{name} ({doc_count}개): {', '.join(keywords)}")
+    topic_keywords[topic_id + 1] = keywords
+    doc_count = (df['토픽'] == topic_id + 1).sum()
+    print(f"토픽 {topic_id + 1} ({doc_count}개): {', '.join(keywords)}")
 
-# ===== 5. 시간적 토픽 변화 =====
+# ===== 4. 연도별 토픽 비중 =====
 print("\n" + "=" * 90)
-print("[5단계] 시간적 토픽 변화 추이")
+print("[4단계] 연도별 토픽 비중 (수집일 기준)")
 print("=" * 90)
 
-time_changes = {
-    '디지털 전환': (12, 18),
-    '탄소 중립': (10, 15),
-    '사회 안전망': (15, 14),
-    '교육 혁신': (8, 12)
-}
+if '수집일' in df.columns:
+    df['연도'] = df['수집일'].astype(str).str[:4]
+    year_counts = pd.crosstab(df['토픽'], df['연도'])
+    year_totals = year_counts.sum(axis=0)
+    print("연도별 문서 수(비중의 분모): " + ", ".join(f"{y}년 {n}건" for y, n in year_totals.items()))
+    print("\n토픽별 문서 수와 비중:")
+    years = list(year_counts.columns)
+    for topic_id, row in year_counts.iterrows():
+        parts = [f"{y}년 {row[y]}건({row[y] / year_totals[y]:.1%})" for y in years]
+        print(f"  토픽 {topic_id} ({', '.join(topic_keywords[topic_id][:2])}): " + " → ".join(parts))
+else:
+    print("수집일 열이 없어 연도별 비중을 계산하지 않는다.")
 
-print("토픽 비중 변화 (2024.01 → 2025.10):")
-for topic, (start, end) in time_changes.items():
-    change = end - start
-    direction = "↑" if change > 0 else ("↓" if change < 0 else "→")
-    print(f"  {topic}: {start}% → {end}% ({direction} {abs(change)}%p)")
-
-# ===== 6. 실습 결과 시사점 =====
+# ===== 5. 결과 요약 =====
 print("\n" + "=" * 90)
-print("[6단계] 실습 결과 시사점")
+print("[5단계] 결과 요약 (이 실행에서 계산한 값)")
 print("=" * 90)
 
-insights = f"""
-1. 높은 분류 정확도:
-   BERT 기반 모델이 {accuracy:.1%} 정확도 달성
-   기존 TF-IDF 방식 (65%) 대비 {(accuracy-0.65)*100:.0f}%p 향상
-
-2. 정책 영역 융합 추세:
-   '디지털정책'과 '교육정책'이 통합 토픽으로 출현
-   → 정책 영역 간 경계 흐려짐, 통합적 정책 수립 필요
-
-3. 시민 여론 파악:
-   감정 분석으로 정책별 시민 반응 정량화
-   디지털정책(58%), 환경정책(55%) 긍정 높음
-   → 정책 우선순위 조정 및 커뮤니케이션 전략 수립 가능
-
-4. 시간적 변화 추적:
-   2024-2025년 디지털 전환(+6%p), 탄소 중립(+5%p) 증가
-   AI 정책 의제 급증 (8개 → 15개)
-   → 정책 트렌드 예측 및 미래 방향 설정에 활용
-
-5. 데이터 규모의 중요성:
-   100개 문서로 유의미한 분석 가능
-   실무에서는 카테고리당 최소 50개 이상 권장
-   → 대규모 데이터셋으로 정확도 더욱 향상 가능
-"""
-
-print(insights)
-
-# ===== 7. 최종 종합 =====
-print("\n" + "=" * 90)
-print("정책 텍스트 분석 종합 결과")
-print("=" * 90)
-
-summary = f"""
-■ 분석 데이터셋
-  - 정책 문서: {len(df)}개
-  - 카테고리: {len(categories)}개
-  - 평균 길이: {df['정책문서'].str.len().mean():.0f}자
-
-■ 분석 결과
-  - 문서 분류 정확도: {accuracy:.1%}
-  - F1 Score: {f1:.3f}
-  - 감정 분석: 긍정 {sentiment_dist.get('긍정', 0)}건,  부정 {sentiment_dist.get('부정', 0)}건
-  - 식별 토픽: {n_topics}개
-
-■ 주요 발견
-  ✓ 딥러닝 방법이 전통적 방법 대비 20%p 정확도 향상
-  ✓ 정책 영역 융합 트렌드 확인 (디지털+교육)
-  ✓ 디지털 전환과 탄소 중립이 정책 우선순위로 부상
-  ✓ 시민 여론의 정책별 차이 정량화 성공
-
-■ 실무 적용 방안
-  1) 신규 정책 제안 → 자동 분류 → 담당 부서 배정
-  2) 유사 정책 탐지 → 중복 방지 → 통합 검토
-  3) 시민 의견 수집 → 감정 분석 → 정책 피드백
-  4) 토픽 모델링 → 의제 우선순위 파악 → 전략 수립
-  5) 시계열 분석 → 트렌드 예측 → 미래 정책 방향
-"""
-
-print(summary)
+smallest = category_dist.idxmin()
+print(f"정책 문서: {len(df)}건, 카테고리: {len(categories)}개")
+print(f"가장 작은 카테고리: {smallest} {category_dist.min()}건")
+print(f"분류 정확도: {accuracy:.1%} (평가 문서 {len(y_test)}건 중 {int(round(accuracy * len(y_test)))}건)")
+print(f"F1 (카테고리별 F1을 문서 수로 가중 평균): {f1:.3f}")
+print(f"토픽 묶음 수: {n_topics}개")
 
 print("\n" + "=" * 90)
 print("주의사항 및 한계")
 print("=" * 90)
 
 limitations = """
-⚠ 본 실습은 교육 목적 간소화 버전입니다:
-  - 실제 BERT 모델 대신 TF-IDF 사용
-  - BERTopic 대신 K-Means 클러스터링 사용
-  - 소규모 데이터셋 (100개 문서)
+본 실습은 교육 목적 간소화 버전이다:
+  - 분류의 수치화는 문장 임베딩 대신 TF-IDF를 쓴다 (임베딩 비교는 10-2-document-classification.py)
+  - 토픽 모델링은 BERTopic 대신 K-평균 군집을 쓰고, 묶음 수를 사람이 정한다
+  - 문서 100건, 카테고리당 5~15건의 소규모 자료다
 
-✓ 실무 적용시 고려사항:
-  - transformers 라이브러리로 실제 BERT 구현
-  - 충분한 양의 라벨링 데이터 확보 (카테고리당 50개+)
-  - GPU 자원 및 학습 시간 고려
-  - 모델 편향 및 공정성 검증
-  - 개인정보 보호 및 데이터 윤리 준수
+실무 적용 시 확인할 것:
+  - 사람이 라벨을 붙인 검증 표본과 대조한다 (카테고리당 50건 기준)
+  - 토픽은 대표 단어를 사람이 읽어 이름을 붙이고, 사람이 주제를 붙인 표본과 대조한 뒤 쓴다
+  - 비중을 보고할 때는 분모(기간별 문서 수)를 함께 적는다
+  - 개인정보는 수치화 전에 마스킹한다
 """
 
 print(limitations)
 
 print("\n" + "=" * 90)
-print("실습 완료!")
+print("실습 완료")
 print("=" * 90)
