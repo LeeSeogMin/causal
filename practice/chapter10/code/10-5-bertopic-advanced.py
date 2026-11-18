@@ -2,10 +2,9 @@
 제10장: BERTopic 기반 고급 토픽 모델링
 ======================================
 
-목적: BERTopic을 활용한 정책 문서 토픽 분석
-- BERT 임베딩 + 클러스터링
-- 동적 토픽 모델링
-- 시간적 변화 추적
+목적: 정책 문서 토픽 분석의 흐름을 간소화 버전으로 실습한다
+- 형태소 분석 → TF-IDF → K-평균 군집 → 대표 단어 → 정답 대조
+- 문서별 토픽 번호, 달별 토픽 비중(동적 토픽)
 
 저자: AI 기반 정책분석방법론
 날짜: 2025-11-20
@@ -18,6 +17,12 @@
   2026-11-18  3단계에 정답 주제와의 교차표, 4단계에 달별 문서 수(비중의 분모)를 출력한다.
   2026-11-18  8단계 "동적 토픽 모델링 인사이트"를 지웠다. 계산하지 않고 코드에 직접 적어 둔
     수치("AI 관련 키워드 8개 → 15개", "'디지털 전환' 토픽 비중 18% → 22%" 등)였다.
+  2026-11-18  실습 문서를 200건으로 바꿨다: 주제 8개 × 20건 + 주제 없는 문서 40건.
+    - 문제: 기존 120건은 모든 문서가 같은 틀 문장 하나를 써서 묶기가 항상 100% 맞았다.
+    - 문장 묶음에서 주제 문장 2~3개와 공통 문장 1~2개를 뽑아 섞는다. 날짜는 무작위로 붙인다.
+    - 단어 세기(상위 50단어) 대신 TF-IDF(전체 단어)를 쓴다. 상위 50단어가 공통 문장의
+      단어로 채워져 묶기가 무너졌기 때문이다(3단계에서 비교 출력).
+    - 묶음 수를 8과 10으로 각각 돌려 정답과 대조한다.
 """
 
 # == RESULTS LOG (auto): 콘솔 출력과 그림을 results/ 에 저장 ==
@@ -60,67 +65,163 @@ except ImportError:
     pass
 # == /RESULTS LOG ==
 
-
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import cosine_similarity
 from kiwipiepy import Kiwi
-from collections import Counter
 
-np.random.seed(42)
+SEED = 42
+rng = np.random.default_rng(SEED)
 
 print("=" * 80)
-print("BERTopic 기반 고급 토픽 모델링")
+print("BERTopic 기반 고급 토픽 모델링 (간소화 버전)")
 print("=" * 80)
 
-# 주의: 실제 BERTopic은 transformers 및 umap-learn, hdbscan 필요
+# 주의: 실제 BERTopic은 sentence-transformers, umap-learn, hdbscan 필요
 # 본 구현은 개념 시연용 간소화 버전
 
-# 1. 샘플 정책 데이터 생성
-print("\n[1단계] 정책 문서 데이터 생성")
+# 1. 가상 정책 문서 생성
+print("\n[1단계] 가상 정책 문서 생성")
 print("-" * 80)
 
-policy_topics = {
-    '디지털 전환': ['디지털', '데이터', 'AI', '플랫폼', '스마트'],
-    '탄소 중립': ['탄소', '재생에너지', '그린', '2050', '친환경'],
-    '사회 안전망': ['복지', '돌봄', '취약계층', '지원', '사회'],
-    '교육 혁신': ['교육', '미래', '맞춤형', '디지털교육', '학생'],
-    '지역 균형': ['지역', '균형', '발전', '격차해소', '지방'],
-    '보건의료': ['보건', '의료', '건강', '예방', '질병'],
-    '일자리 창출': ['일자리', '청년', '고용', '창업', '취업'],
-    'R&D 투자': ['연구', '개발', '혁신', '기술', '투자 ']
+TOPIC_SENTENCES = {
+    '디지털 전환': [
+        "행정 서류를 온라인으로 신청할 수 있도록 민원 플랫폼을 개편한다.",
+        "공공기관이 보유한 데이터를 개방해 민간이 새로운 서비스를 만들 수 있게 한다.",
+        "인공지능 상담원이 야간에도 주민의 질문에 답하도록 시스템을 구축했다.",
+        "종이 문서를 전자 문서로 바꾸면서 처리 기간이 짧아졌다.",
+        "고령층이 스마트폰 앱을 쉽게 쓰도록 디지털 교육 강좌를 연다.",
+        "클라우드로 전산 시스템을 옮겨 유지 비용을 줄인다.",
+        "개인정보가 새지 않도록 데이터 접근 권한을 엄격하게 관리한다.",
+        "AI 기반 분석으로 민원이 많은 지역을 미리 찾아낸다.",
+    ],
+    '탄소 중립': [
+        "공공건물 옥상에 태양광 패널을 설치해 전력 사용량을 낮춘다.",
+        "노후 경유차를 전기차로 바꾸는 시민에게 보조금을 준다.",
+        "2050년까지 온실가스 배출을 0으로 만드는 계획을 세웠다.",
+        "공장의 탄소 배출량을 측정하고 기준을 넘으면 부담금을 물린다.",
+        "도심 곳곳에 숲을 조성해 여름철 기온을 떨어뜨린다.",
+        "재생에너지 발전소를 늘려 석탄 발전 비중을 줄인다.",
+        "일회용품 사용을 줄이는 매장에는 인증 표시를 붙여 준다.",
+        "건물의 단열을 보강하면 난방에 드는 에너지가 적게 든다.",
+    ],
+    '사회 안전망': [
+        "혼자 사는 노인을 방문해 건강과 생활 형편을 살핀다.",
+        "갑자기 소득이 끊긴 가구에 긴급 생계비를 지급한다.",
+        "장애인 활동 지원 시간을 늘려 가족의 돌봄 부담을 덜어 준다.",
+        "기초생활 수급 기준을 완화해 사각지대에 놓인 가구를 찾아낸다.",
+        "아동 학대가 의심되면 전담 공무원이 즉시 현장에 나간다.",
+        "취약계층 가구의 난방비와 전기료 일부를 지원한다.",
+        "돌봄이 필요한 가정에 요양보호사를 보내 준다.",
+        "복지 상담 창구를 하나로 합쳐 여러 번 찾아오지 않아도 되게 했다.",
+    ],
+    '교육 혁신': [
+        "학생마다 학습 속도가 달라 수준별 수업을 확대한다.",
+        "교사가 수업 자료를 공유하는 온라인 공간을 만든다.",
+        "방과 후에 아이들이 머물며 공부할 수 있는 교실을 늘린다.",
+        "기초 학력이 부족한 학생에게 보충 수업을 제공한다.",
+        "진로 체험 프로그램으로 학생들이 다양한 직업을 경험하게 한다.",
+        "대학 입시 위주의 수업을 토론과 프로젝트 중심으로 바꾼다.",
+        "학교 급식에 지역 농산물을 쓰고 영양 교육을 함께 한다.",
+        "교원 연수를 늘려 새로운 교육 과정을 가르칠 수 있게 돕는다.",
+    ],
+    '지역 균형': [
+        "수도권에 몰린 공공기관을 지방으로 옮긴다.",
+        "인구가 줄어드는 군 지역에 정착 지원금을 준다.",
+        "농촌과 도시를 잇는 버스 노선을 새로 만든다.",
+        "지방 대학과 지역 기업이 함께 인재를 키우는 사업을 벌인다.",
+        "낙후된 구도심을 재생해 상권을 되살린다.",
+        "지역마다 다른 특산물을 브랜드로 만들어 판로를 넓힌다.",
+        "지방 의료기관이 부족한 곳에 공공병원을 세운다.",
+        "청년이 고향에 돌아와 창업하면 임대료를 깎아 준다.",
+    ],
+    '보건의료': [
+        "독감 예방접종을 어르신에게 무료로 놓아 준다.",
+        "응급실이 붐비지 않도록 야간 진료 병원을 지정한다.",
+        "만성질환자가 집에서 혈압과 혈당을 측정하고 의사와 상담한다.",
+        "감염병이 퍼지면 역학 조사반이 접촉자를 추적한다.",
+        "정신 건강 상담 센터를 늘려 우울증 치료를 돕는다.",
+        "의료비가 많이 나온 가구에 본인 부담금을 돌려준다.",
+        "건강 검진 결과가 나쁘면 보건소가 생활 습관 상담을 한다.",
+        "의사가 부족한 지역에 공중보건의를 배치한다.",
+    ],
+    '일자리 창출': [
+        "청년을 새로 채용한 중소기업에 인건비를 지원한다.",
+        "실직자가 새 기술을 배우는 직업 훈련 과정을 연다.",
+        "창업 초기 기업에 사무 공간과 컨설팅을 제공한다.",
+        "고용센터에서 구직자와 기업을 직접 연결해 준다.",
+        "경력이 끊긴 여성이 다시 일할 수 있도록 맞춤형 교육을 한다.",
+        "공공 일자리를 만들어 취업이 어려운 노인을 고용한다.",
+        "근로 시간을 줄이면서 일자리를 나누는 기업을 지원한다.",
+        "취업 박람회를 열어 지역 기업의 채용을 돕는다.",
+    ],
+    'R&D 투자': [
+        "반도체 핵심 기술 개발에 연구비를 집중 투자한다.",
+        "대학 연구실의 성과가 창업으로 이어지도록 기술 이전을 돕는다.",
+        "젊은 연구자가 안정적으로 연구하도록 장기 과제를 늘린다.",
+        "기업 부설 연구소의 연구 개발비에 세금을 감면한다.",
+        "실패 가능성이 큰 도전적 연구에도 예산을 배정한다.",
+        "국가 연구 장비를 여러 기관이 함께 쓰도록 개방한다.",
+        "특허 출원을 돕고 기술 사업화 자금을 빌려준다.",
+        "기초 과학 연구에 대한 정부 투자를 매년 늘린다.",
+    ],
 }
 
-documents = []
-doc_topics = []
-timestamps = []
+# 주제와 상관없이 정책 문서에 흔히 붙는 문장 (모든 주제가 공유한다)
+COMMON_SENTENCES = [
+    "정부는 관계 부처와 협의해 이 정책을 추진한다.",
+    "올해 예산은 작년보다 늘어났다.",
+    "자세한 내용은 담당 부서에 문의하면 된다.",
+    "사업 성과는 연말에 평가해 공개한다.",
+    "시민 의견을 듣기 위해 공청회를 연다.",
+    "관련 법령을 개정해 제도적 근거를 마련한다.",
+]
 
-for i, (topic_name, keywords) in enumerate(policy_topics.items()):
-    for j in range(15):  # 각 토픽당 15개 문서
-        # 문서 생성
-        selected_keywords = np.random.choice(keywords, size=3, replace=False)
-        doc = f"정부는 {' '.join(selected_keywords)} 정책을 추진한다. {topic_name} 분야 발전을 도모한다."
-        documents.append(doc)
-        doc_topics.append(topic_name)
-        # 시간 정보
-        month = (i * 2 + j % 12) % 24 + 1  # 2024.01 ~ 2025.12
-        year = 2024 + (month // 13)
-        month = month % 12 + 1
-        timestamps.append(f"{year}.{month:02d}")
+# 어느 주제에도 해당하지 않는 문서의 문장
+OFF_TOPIC_SENTENCES = [
+    "청사 주차장은 이번 주말 도색 공사로 이용할 수 없다.",
+    "다음 달 첫째 주에 직원 체육대회가 열린다.",
+    "구내식당 운영 시간이 오전 11시 반으로 바뀐다.",
+    "인사 발령에 따라 일부 부서의 전화번호가 달라졌다.",
+    "엘리베이터 정기 점검으로 오후에 운행을 멈춘다.",
+    "회의실 예약은 내부 게시판에서 하면 된다.",
+    "분실물은 1층 안내 데스크에 보관하고 있다.",
+    "정전에 대비해 비상 발전기를 시험 가동한다.",
+    "새해 시무식은 대강당에서 오전 9시에 시작한다.",
+    "보안을 위해 출입증을 반드시 패용해야 한다.",
+    "사무실 냉방 온도는 26도로 맞춘다.",
+    "문서 보존 기간이 지난 서류를 일괄 폐기한다.",
+]
 
-df = pd.DataFrame({
-    'document': documents,
-    'true_topic': doc_topics,
-    'timestamp': timestamps
-})
+
+rows = []
+for topic, pool in TOPIC_SENTENCES.items():
+    for _ in range(20):                                                  # 주제마다 20건
+        sents = list(rng.choice(pool, size=rng.integers(2, 4), replace=False))           # 주제 문장 2~3개
+        sents += list(rng.choice(COMMON_SENTENCES, size=rng.integers(1, 3), replace=False))  # 공통 문장 1~2개
+        rng.shuffle(sents)
+        rows.append((' '.join(sents), topic))
+for _ in range(40):                                                      # 주제 없는 문서 40건
+    sents = list(rng.choice(OFF_TOPIC_SENTENCES, size=rng.integers(2, 4), replace=False))
+    if rng.random() < 0.5:
+        sents.append(rng.choice(COMMON_SENTENCES))
+    rng.shuffle(sents)
+    rows.append((' '.join(sents), '주제 없음'))
+
+df = pd.DataFrame(rows, columns=['document', 'true_topic'])
+months = rng.integers(0, 24, size=len(df))                               # 2024.01~2025.12 중 무작위
+df['timestamp'] = [f"{2024 + m // 12}.{m % 12 + 1:02d}" for m in months]
 
 print(f"총 문서 수: {len(df)}")
-print(f"토픽 수: {len(policy_topics)}")
+print("정답 주제별 문서 수: " + ", ".join(f"{k} {v}" for k, v in df['true_topic'].value_counts().items()))
 print(f"기간: {df['timestamp'].min()} ~ {df['timestamp'].max()}")
+print(f"예(디지털 전환): {df['document'][0]}")
+print(f"예(주제 없음)  : {df['document'][len(df) - 1]}")
 
-# 2. 간소화된 토픽 모델링 (실제 BERTopic 대체)
-print("\n[2단계] 토픽 모델링 (간소화 버전)")
+# 2. 형태소 분석과 수치화
+print("\n[2단계] 형태소 분석과 수치화")
 print("-" * 80)
 
 # 형태소 분석: 문장을 형태소로 나누고 명사(일반명사 NNG, 고유명사 NNP, 영문 SL)만 남긴다
@@ -136,73 +237,79 @@ df['nouns'] = df['document'].apply(extract_nouns)
 print(f"원문    : {df['document'][0]}")
 print(f"명사만  : {df['nouns'][0]}")
 
-# 명사 빈도 기반 벡터화
-vectorizer = CountVectorizer(max_features=50, ngram_range=(1, 2))
+# TF-IDF: 많은 문서에 나오는 단어(공통 문장의 단어)의 비중을 낮춘다
+vectorizer = TfidfVectorizer()
 doc_vectors = vectorizer.fit_transform(df['nouns'])
+feature_names = vectorizer.get_feature_names_out()
+print(f"서로 다른 명사 수: {len(feature_names)}")
 
-# K-Means 클러스터링
-n_topics = 8
-kmeans = KMeans(n_clusters=n_topics, random_state=42)
-cluster_labels = kmeans.fit_predict(doc_vectors)
 
-df['predicted_topic'] = cluster_labels
+def check_against_truth(labels, title):
+    """묶음 번호와 정답 주제를 교차표로 대조하고, 섞인 묶음 수를 센다."""
+    table = pd.crosstab(df['true_topic'], labels + 1, rownames=['정답 주제'], colnames=['토픽'])
+    topic_rows = table.drop('주제 없음')
+    mixed = [c for c in table.columns if (topic_rows[c] > 0).sum() > 1]
+    off_only = [c for c in table.columns if topic_rows[c].sum() == 0]
+    off_mixed = [c for c in table.columns if topic_rows[c].sum() > 0 and table.loc['주제 없음', c] > 0]
+    print(f"\n{title} — 정답 주제와 대조 (행: 정답 주제, 열: 토픽 번호, 칸: 문서 수)")
+    print(table.to_string())
+    print(f"두 주제 이상이 섞인 토픽: {mixed if mixed else '없음'}")
+    print(f"주제 없는 문서만 모인 토픽: {off_only if off_only else '없음'}")
+    print(f"주제 문서와 주제 없는 문서가 섞인 토픽: {off_mixed if off_mixed else '없음'}")
 
-# 3. 토픽별 대표 키워드 추출
-print("\n[3단계] 토픽별 대표 키워드")
+
+def top_keywords(model, n=5):
+    return {c: [feature_names[i] for i in model.cluster_centers_[c].argsort()[-n:][::-1]]
+            for c in range(model.n_clusters)}
+
+
+# 3. 묶기, 대표 단어, 정답 대조
+print("\n[3단계] 묶기와 대표 단어, 정답 대조")
 print("-" * 80)
 
-feature_names = vectorizer.get_feature_names_out()
-topics_keywords = {}
+# 참고: 단어 세기 상위 50단어로 수치화하면 무엇이 남는가
+count50 = CountVectorizer(max_features=50).fit(df['nouns'])
+freq50 = np.asarray(count50.transform(df['nouns']).sum(axis=0)).ravel()
+top15 = [count50.get_feature_names_out()[i] for i in freq50.argsort()[::-1][:15]]
+print("단어 세기 상위 50단어 중 많이 나온 15개: " + ", ".join(top15))
+labels_c50 = KMeans(n_clusters=10, random_state=SEED, n_init=10).fit_predict(count50.transform(df['nouns']))
+table_c50 = pd.crosstab(df['true_topic'], labels_c50).drop('주제 없음')
+print(f"단어 세기 상위 50단어로 10묶음: 정답 주제 문서 160건 중 묶음별 다수 주제와 같은 문서 "
+      f"{table_c50.max(axis=0).sum()}건")
 
-for topic_id in range(n_topics):
-    # 해당 토픽의 중심 벡터
-    center = kmeans.cluster_centers_[topic_id]
-    # 상위 5개 키워드
-    top_indices = center.argsort()[-5:][::-1]
-    keywords = [feature_names[idx] for idx in top_indices]
-    topics_keywords[topic_id] = keywords
-    
-    # 문서 수
-    doc_count = (df['predicted_topic'] == topic_id).sum()
-    
-    print(f"토픽 {topic_id + 1} ({doc_count}개 문서): {', '.join(keywords)}")
+for n_topics in (8, 10):
+    model = KMeans(n_clusters=n_topics, random_state=SEED, n_init=10).fit(doc_vectors)
+    keywords = top_keywords(model)
+    print(f"\n--- 묶음 수 {n_topics} ---")
+    for c in range(n_topics):
+        print(f"토픽 {c + 1} ({(model.labels_ == c).sum()}개 문서): {', '.join(keywords[c])}")
+    check_against_truth(model.labels_, f"묶음 수 {n_topics}")
 
-# 정답 대조: 문서를 만들 때 정한 주제(true_topic)와 묶음 번호를 교차표로 센다
-print("\n정답 주제와 대조 (행: 정답 주제, 열: 토픽 번호, 칸: 문서 수):")
-check_table = pd.crosstab(df['true_topic'], df['predicted_topic'] + 1)
-print(check_table.to_string())
-match_count = check_table.max(axis=0).sum()  # 토픽마다 가장 많은 정답 주제의 문서 수를 더한다
-print(f"일치 문서: {match_count} / {len(df)} ({match_count / len(df):.1%})")
+# 이후 단계는 묶음 수 10의 결과를 쓴다
+n_topics = 10
+kmeans = KMeans(n_clusters=n_topics, random_state=SEED, n_init=10).fit(doc_vectors)
+df['predicted_topic'] = kmeans.labels_
+topics_keywords = top_keywords(kmeans)
 
 # 4. 시간적 토픽 변화
-print("\n[4단계] 시간적 토픽 변화 추이")
+print("\n[4단계] 시간적 토픽 변화 추이 (묶음 수 10)")
 print("-" * 80)
 
-# 시기별 그룹화
-df['year_month'] = df['timestamp']
-time_topic_dist = df.groupby(['year_month', 'predicted_topic']).size().unstack(fill_value=0)
+time_topic_dist = df.groupby(['timestamp', 'predicted_topic']).size().unstack(fill_value=0)
+time_topic_dist = time_topic_dist.reindex(columns=range(n_topics), fill_value=0).sort_index()
 
 # 비중의 분모: 달마다 문서가 몇 건인지 먼저 확인한다
 month_counts = time_topic_dist.sum(axis=1)
 print(f"달 수: {len(month_counts)}, 달별 문서 수: 최소 {month_counts.min()}건 ~ 최대 {month_counts.max()}건")
 
-# 주요 시기 비교
-start_period = '2024.01'
-end_period = '2025.10'
-
+start_period, end_period = '2024.01', '2025.10'
 if start_period in time_topic_dist.index and end_period in time_topic_dist.index:
-    print(f"\n토픽 분포 변화 ({start_period} → {end_period}):")
-
-    start_total = time_topic_dist.loc[start_period].sum()
-    end_total = time_topic_dist.loc[end_period].sum()
-
-    for topic_id in range(min(5, n_topics)):  # 상위 5개만
-        start_pct = time_topic_dist.loc[start_period, topic_id] / start_total * 100 if start_total > 0 else 0
-        end_pct = time_topic_dist.loc[end_period, topic_id] / end_total * 100 if end_total > 0 else 0
-        change = end_pct - start_pct
-
-        direction = "↑" if change > 0 else ("↓" if change < 0 else "→")
-        print(f"  토픽 {topic_id + 1}: {start_pct:.1f}% → {end_pct:.1f}% ({direction} {abs(change):.1f}%p)")
+    print(f"\n토픽 분포 변화 ({start_period} {month_counts[start_period]}건 → {end_period} {month_counts[end_period]}건):")
+    for topic_id in range(n_topics):
+        s_n, e_n = time_topic_dist.loc[start_period, topic_id], time_topic_dist.loc[end_period, topic_id]
+        s_pct, e_pct = s_n / month_counts[start_period] * 100, e_n / month_counts[end_period] * 100
+        print(f"  토픽 {topic_id + 1} ({', '.join(topics_keywords[topic_id][:2])}): "
+              f"{s_n}건 {s_pct:.1f}% → {e_n}건 {e_pct:.1f}%")
 
 # 동적 토픽 변화 그래프 생성
 import matplotlib.pyplot as plt
@@ -211,23 +318,12 @@ matplotlib.rc('font', family='AppleGothic')
 plt.rcParams['axes.unicode_minus'] = False
 
 fig, ax = plt.subplots(figsize=(14, 8))
-
-# 시간순 정렬
-time_topic_dist_sorted = time_topic_dist.sort_index()
-
-# 비율로 변환
-time_topic_pct = time_topic_dist_sorted.div(time_topic_dist_sorted.sum(axis=1), axis=0) * 100
-
-# 각 토픽별 선 그래프
+time_topic_pct = time_topic_dist.div(month_counts, axis=0) * 100
 colors = plt.cm.tab10(range(n_topics))
 for topic_id in range(n_topics):
     topic_label = f"토픽 {topic_id + 1}: {', '.join(topics_keywords[topic_id][:2])}"
-    ax.plot(range(len(time_topic_pct)),
-            time_topic_pct[topic_id],
-            marker='o',
-            linewidth=2,
-            label=topic_label,
-            color=colors[topic_id])
+    ax.plot(range(len(time_topic_pct)), time_topic_pct[topic_id], marker='o', linewidth=2,
+            label=topic_label, color=colors[topic_id])
 
 ax.set_xlabel('시간 (2024.01 - 2025.12)', fontsize=12)
 ax.set_ylabel('토픽 비중 (%)', fontsize=12)
@@ -235,42 +331,32 @@ ax.set_title('동적 토픽 변화 추이 (Topics Over Time)', fontsize=14, font
 ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
 ax.grid(True, alpha=0.3)
 ax.set_xticks(range(0, len(time_topic_pct), 3))
-ax.set_xticklabels([time_topic_pct.index[i] if i < len(time_topic_pct) else ''
-                     for i in range(0, len(time_topic_pct), 3)], rotation=45)
+ax.set_xticklabels([time_topic_pct.index[i] for i in range(0, len(time_topic_pct), 3)], rotation=45)
 
 plt.tight_layout()
 plt.savefig('../../../diagrams/10-bertopic-topics-over-time.png', dpi=300, bbox_inches='tight')
 print("\n✓ 그래프 저장: diagrams/10-bertopic-topics-over-time.png")
 
 # 5. 토픽 간 관계 분석
-print("\n[5단계] 토픽 간 유사도")
+print("\n[5단계] 토픽 간 유사도 (묶음 수 10)")
 print("-" * 80)
-
-# 중심 벡터 간 코사인 유사도
-from sklearn.metrics.pairwise import cosine_similarity
 
 topic_similarity = cosine_similarity(kmeans.cluster_centers_)
-
-print("유사한 토픽 쌍 (유사도 > 0.3):")
-for i in range(n_topics):
-    for j in range(i+1, n_topics):
-        sim = topic_similarity[i, j]
-        if sim > 0.3:
-            kw_i = ', '.join(topics_keywords[i][:2])
-            kw_j = ', '.join(topics_keywords[j][:2])
-            print(f"  토픽 {i+1} ({kw_i}) <-> 토픽 {j+1} ({kw_j}): {sim:.3f}")
+iu = np.triu_indices(n_topics, 1)
+print(f"토픽 {len(iu[0])}쌍의 유사도: 최소 {topic_similarity[iu].min():.3f} ~ 최대 {topic_similarity[iu].max():.3f}")
+i_max, j_max = iu[0][topic_similarity[iu].argmax()], iu[1][topic_similarity[iu].argmax()]
+print(f"가장 비슷한 쌍: 토픽 {i_max + 1} ({', '.join(topics_keywords[i_max][:2])}) <-> "
+      f"토픽 {j_max + 1} ({', '.join(topics_keywords[j_max][:2])}): {topic_similarity[i_max, j_max]:.3f}")
 
 # 6. 문서별 토픽 할당
-print("\n[6단계] 문서별 토픽 할당 예시")
+print("\n[6단계] 문서별 토픽 할당 예시 (묶음 수 10)")
 print("-" * 80)
 
-sample_docs = df.head(5)
-for idx, row in sample_docs.iterrows():
-    predicted_topic = row['predicted_topic']
-    keywords = ', '.join(topics_keywords[predicted_topic][:3])
-    print(f"문서 {idx + 1}: {row['document'][:50]}...")
-    print(f"  → 토픽 {predicted_topic + 1} ({keywords})")
-    print()
+for idx in [0, 20, len(df) - 1]:
+    row = df.loc[idx]
+    t = row['predicted_topic']
+    print(f"문서 {idx + 1} (정답: {row['true_topic']}): {row['document'][:45]}...")
+    print(f"  → 토픽 {t + 1} ({', '.join(topics_keywords[t][:3])})")
 
 # 7. BERTopic과 LDA 비교
 print("\n[7단계] BERTopic vs LDA 비교")
@@ -281,42 +367,15 @@ comparison = pd.DataFrame({
     'LDA': ['단어 빈도만', '사전 지정 필요', '중간', '낮음', '높음'],
     'BERTopic': ['의미적 이해', '자동 결정', '높음', '높음', '중간']
 })
-
 print(comparison.to_string(index=False))
 
 # 8. 최종 요약
 print("\n" + "=" * 80)
-print("BERTopic 토픽 모델링 최종 결과")
+print("토픽 모델링 최종 결과 (묶음 수 10)")
 print("=" * 80)
-
-final_summary = f"""
-분석 문서 수: {len(df)}개
-식별된 토픽 수: {n_topics}개
-
-주요 토픽:
-"""
-
-for i in range(min(3, n_topics)):
-    doc_count = (df['predicted_topic'] == i).sum()
-    keywords = ', '.join(topics_keywords[i][:3])
-    final_summary += f"\n  토픽 {i+1} ({doc_count}개): {keywords}"
-
-final_summary += """
-
-BERTopic 장점:
-  ✓ 문맥적 의미 이해 (BERT 임베딩)
-  ✓ 자동 토픽 수 결정 (HDBSCAN)
-  ✓ 고품질 클러스터링
-  ✓ 동적 토픽 추적 가능
-
-실무 적용:
-  - 정책 의제 우선순위 파악
-  - 시간적 트렌드 분석
-  - 정책 영역 융합 탐지
-  - 신규 정책 테마 발견
-"""
-
-print(final_summary)
+print(f"분석 문서 수: {len(df)}개")
+for c in range(n_topics):
+    print(f"  토픽 {c + 1} ({(df['predicted_topic'] == c).sum()}개): {', '.join(topics_keywords[c][:3])}")
 
 print("\n참고: 실제 BERTopic 구현은 다음 라이브러리 필요:")
 print("pip install bertopic sentence-transformers umap-learn hdbscan")
