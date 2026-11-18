@@ -160,8 +160,8 @@ save('10e-3.png')
 # ---------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(11, 3.6))
 ax.set_xlim(0, 12); ax.set_ylim(0, 4); ax.axis('off')
-labels = ['① 기사·민원\n수집', '② 감성 분류로 부정도를\n월별·지역별 집계',
-          '③ 정책 도입 시점 기준\n이중차분', '④ 다섯 함정 점검 결과를\n추정치와 함께 보고']
+labels = ['① 민원\n수집', '② 감성 분류로 민원마다\n부정 여부(0/1)',
+          '③ 회귀식\n처리기간 ~ 부정 + 분야', '④ 추정치와 분류기의\n카파를 함께 보고']
 cols = [(GRAY, GRAY_E), (BLUE, BLUE_E), (GREEN, GREEN_E), (YELLOW, YELLOW_E)]
 xs = [1.5, 4.5, 7.5, 10.5]
 for x, s, (fc, ec) in zip(xs, labels, cols):
@@ -172,7 +172,7 @@ ax.plot([0.3, 5.7], [1.5, 1.5], color=BLUE_E, linewidth=3)
 ax.text(3.0, 1.05, '딥러닝: 변수를 만든다 (상관을 학습한다)', ha='center', va='center',
         fontsize=11, fontweight='bold', color=BLUE_E)
 ax.plot([6.3, 11.7], [1.5, 1.5], color=GREEN_E, linewidth=3)
-ax.text(9.0, 1.05, '준실험설계(3~9장): 인과효과를 추정한다', ha='center', va='center',
+ax.text(9.0, 1.05, '회귀·준실험설계(3~9장): 인과효과를 추정한다', ha='center', va='center',
         fontsize=11, fontweight='bold', color=GREEN_E)
 save('10e-4.png')
 

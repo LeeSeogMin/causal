@@ -23,6 +23,12 @@
     - 단어 세기(상위 50단어) 대신 TF-IDF(전체 단어)를 쓴다. 상위 50단어가 공통 문장의
       단어로 채워져 묶기가 무너졌기 때문이다(3단계에서 비교 출력).
     - 묶음 수를 8과 10으로 각각 돌려 정답과 대조한다.
+  2026-11-18  문서를 1,200건(24개월 × 50건)으로 늘리고, 주제별 비중이 시간에 따라 바뀌게 만들었다.
+    - 문제: 날짜를 무작위로 붙여 동적 토픽 그림에 실제 변화가 없었다.
+    - 증가(디지털 전환·탄소 중립·R&D 투자), 감소(보건의료·일자리 창출), 유지(사회 안전망·교육 혁신),
+      소멸(지역 균형, 2025.07부터 0건)으로 만든다. 주제 없는 문서는 매달 약 10%.
+    - 4단계: 분기별 비중을 계산하고, 직선 추세로 2026Q1·Q2 비중을 예측한다.
+    - 달마다 기대 건수를 정수로 맞춰 배정한다(뽑기 잡음 없음). 묶음 수는 8과 9를 비교하고 9를 쓴다.
 """
 
 # == RESULTS LOG (auto): 콘솔 출력과 그림을 results/ 에 저장 ==
@@ -196,29 +202,62 @@ OFF_TOPIC_SENTENCES = [
 ]
 
 
-rows = []
-for topic, pool in TOPIC_SENTENCES.items():
-    for _ in range(20):                                                  # 주제마다 20건
-        sents = list(rng.choice(pool, size=rng.integers(2, 4), replace=False))           # 주제 문장 2~3개
-        sents += list(rng.choice(COMMON_SENTENCES, size=rng.integers(1, 3), replace=False))  # 공통 문장 1~2개
-        rng.shuffle(sents)
-        rows.append((' '.join(sents), topic))
-for _ in range(40):                                                      # 주제 없는 문서 40건
-    sents = list(rng.choice(OFF_TOPIC_SENTENCES, size=rng.integers(2, 4), replace=False))
-    if rng.random() < 0.5:
-        sents.append(rng.choice(COMMON_SENTENCES))
-    rng.shuffle(sents)
-    rows.append((' '.join(sents), '주제 없음'))
+# 달마다 주제별 문서 비중이 달라지도록 만든다 (2024.01~2025.12, 24개월 × 50건)
+#   증가: 디지털 전환, 탄소 중립, R&D 투자 / 감소: 보건의료, 일자리 창출
+#   유지: 사회 안전망, 교육 혁신 / 소멸: 지역 균형(2025.07부터 0건)
+N_MONTHS, DOCS_PER_MONTH, OFF_TOPIC_SHARE = 24, 50, 0.10
 
-df = pd.DataFrame(rows, columns=['document', 'true_topic'])
-months = rng.integers(0, 24, size=len(df))                               # 2024.01~2025.12 중 무작위
-df['timestamp'] = [f"{2024 + m // 12}.{m % 12 + 1:02d}" for m in months]
+
+def topic_weights(t):
+    s = t / (N_MONTHS - 1)                     # 0(첫 달) ~ 1(마지막 달)
+    return {
+        '디지털 전환': 6 + 16 * s,
+        '탄소 중립': 8 + 10 * s,
+        '사회 안전망': 12,
+        '교육 혁신': 11,
+        '지역 균형': 14 * (1 - t / 17) if t < 18 else 0,
+        '보건의료': 16 - 10 * s,
+        '일자리 창출': 13 - 3 * s,
+        'R&D 투자': 8 + 4 * s,
+    }
+
+
+def make_document(topic):
+    if topic == '주제 없음':
+        sents = list(rng.choice(OFF_TOPIC_SENTENCES, size=rng.integers(2, 4), replace=False))
+        if rng.random() < 0.5:
+            sents.append(rng.choice(COMMON_SENTENCES))
+    else:
+        pool = TOPIC_SENTENCES[topic]
+        sents = list(rng.choice(pool, size=rng.integers(2, 4), replace=False))            # 주제 문장 2~3개
+        sents += list(rng.choice(COMMON_SENTENCES, size=rng.integers(1, 3), replace=False))  # 공통 문장 1~2개
+    rng.shuffle(sents)
+    return ' '.join(sents)
+
+
+rows = []
+for t in range(N_MONTHS):
+    w = topic_weights(t)
+    names = list(w) + ['주제 없음']
+    probs = np.array(list(w.values())) / sum(w.values()) * (1 - OFF_TOPIC_SHARE)
+    probs = np.append(probs, OFF_TOPIC_SHARE)
+    # 기대 건수를 정수로 맞춘다(소수점이 큰 순서로 1건씩 더 준다). 뽑기 잡음 없이 설계한 추세가 그대로 나온다
+    expected = probs * DOCS_PER_MONTH
+    counts = np.floor(expected).astype(int)
+    counts[np.argsort(-(expected - counts))[:DOCS_PER_MONTH - counts.sum()]] += 1
+    stamp = f"{2024 + t // 12}.{t % 12 + 1:02d}"
+    for name, k in zip(names, counts):
+        for _ in range(k):
+            rows.append((make_document(name), name, stamp))
+
+df = pd.DataFrame(rows, columns=['document', 'true_topic', 'timestamp'])
 
 print(f"총 문서 수: {len(df)}")
 print("정답 주제별 문서 수: " + ", ".join(f"{k} {v}" for k, v in df['true_topic'].value_counts().items()))
 print(f"기간: {df['timestamp'].min()} ~ {df['timestamp'].max()}")
-print(f"예(디지털 전환): {df['document'][0]}")
-print(f"예(주제 없음)  : {df['document'][len(df) - 1]}")
+print(f"예({df['true_topic'][0]}): {df['document'][0]}")
+off_example = df.index[df['true_topic'] == '주제 없음'][0]
+print(f"예(주제 없음): {df['document'][off_example]}")
 
 # 2. 형태소 분석과 수치화
 print("\n[2단계] 형태소 분석과 수치화")
@@ -274,10 +313,10 @@ top15 = [count50.get_feature_names_out()[i] for i in freq50.argsort()[::-1][:15]
 print("단어 세기 상위 50단어 중 많이 나온 15개: " + ", ".join(top15))
 labels_c50 = KMeans(n_clusters=10, random_state=SEED, n_init=10).fit_predict(count50.transform(df['nouns']))
 table_c50 = pd.crosstab(df['true_topic'], labels_c50).drop('주제 없음')
-print(f"단어 세기 상위 50단어로 10묶음: 정답 주제 문서 160건 중 묶음별 다수 주제와 같은 문서 "
+print(f"단어 세기 상위 50단어로 10묶음: 정답 주제 문서 {table_c50.values.sum()}건 중 묶음별 다수 주제와 같은 문서 "
       f"{table_c50.max(axis=0).sum()}건")
 
-for n_topics in (8, 10):
+for n_topics in (8, 9):
     model = KMeans(n_clusters=n_topics, random_state=SEED, n_init=10).fit(doc_vectors)
     keywords = top_keywords(model)
     print(f"\n--- 묶음 수 {n_topics} ---")
@@ -285,60 +324,77 @@ for n_topics in (8, 10):
         print(f"토픽 {c + 1} ({(model.labels_ == c).sum()}개 문서): {', '.join(keywords[c])}")
     check_against_truth(model.labels_, f"묶음 수 {n_topics}")
 
-# 이후 단계는 묶음 수 10의 결과를 쓴다
-n_topics = 10
+# 이후 단계는 묶음 수 9의 결과를 쓴다
+n_topics = 9
 kmeans = KMeans(n_clusters=n_topics, random_state=SEED, n_init=10).fit(doc_vectors)
 df['predicted_topic'] = kmeans.labels_
 topics_keywords = top_keywords(kmeans)
 
-# 4. 시간적 토픽 변화
-print("\n[4단계] 시간적 토픽 변화 추이 (묶음 수 10)")
+# 4. 시간적 토픽 변화 (동적 토픽)
+print(f"\n[4단계] 분기별 토픽 비중과 다음 두 분기 예측 (묶음 수 {n_topics})")
 print("-" * 80)
 
-time_topic_dist = df.groupby(['timestamp', 'predicted_topic']).size().unstack(fill_value=0)
-time_topic_dist = time_topic_dist.reindex(columns=range(n_topics), fill_value=0).sort_index()
+# 달별 문서는 50건 안팎이라 한 달 단위 비중은 출렁인다. 분기(3개월)로 묶어 분모를 키운다
+df['quarter'] = [f"{ts[:4]}Q{(int(ts[5:7]) - 1) // 3 + 1}" for ts in df['timestamp']]
+q_counts = df.groupby(['quarter', 'predicted_topic']).size().unstack(fill_value=0)
+q_counts = q_counts.reindex(columns=range(n_topics), fill_value=0).sort_index()
+q_totals = q_counts.sum(axis=1)
+q_share = q_counts.div(q_totals, axis=0) * 100
+print("분기별 문서 수(비중의 분모): " + ", ".join(f"{q} {n}건" for q, n in q_totals.items()))
 
-# 비중의 분모: 달마다 문서가 몇 건인지 먼저 확인한다
-month_counts = time_topic_dist.sum(axis=1)
-print(f"달 수: {len(month_counts)}, 달별 문서 수: 최소 {month_counts.min()}건 ~ 최대 {month_counts.max()}건")
+# 직선 추세: 분기 번호(0~7)에 비중을 직선으로 맞추고, 같은 직선을 두 분기 더 늘려 예측한다
+x = np.arange(len(q_share))
+future = ['2026Q1', '2026Q2']
+x_future = np.arange(len(q_share), len(q_share) + len(future))
+trend = {}
+print(f"\n{'토픽':<22}{'첫 분기':>8}{'마지막 분기':>10}{'분기당 변화':>11}{'2026Q1 예측':>12}{'2026Q2 예측':>12}  판정")
+for c in range(n_topics):
+    y = q_share[c].to_numpy()
+    slope, intercept = np.polyfit(x, y, 1)
+    pred = np.clip(intercept + slope * x_future, 0, 100)
+    if y[0] >= 5 and y[-2:].max() < 1:
+        verdict = '소멸'
+    elif slope >= 0.5:
+        verdict = '증가'
+    elif slope <= -0.5:
+        verdict = '감소'
+    else:
+        verdict = '유지'
+    trend[c] = (slope, pred, verdict)
+    name = f"토픽 {c + 1} ({', '.join(topics_keywords[c][:2])})"
+    print(f"{name:<22}{y[0]:>7.1f}%{y[-1]:>9.1f}%{slope:>+9.2f}%p{pred[0]:>11.1f}%{pred[1]:>11.1f}%  {verdict}")
 
-start_period, end_period = '2024.01', '2025.10'
-if start_period in time_topic_dist.index and end_period in time_topic_dist.index:
-    print(f"\n토픽 분포 변화 ({start_period} {month_counts[start_period]}건 → {end_period} {month_counts[end_period]}건):")
-    for topic_id in range(n_topics):
-        s_n, e_n = time_topic_dist.loc[start_period, topic_id], time_topic_dist.loc[end_period, topic_id]
-        s_pct, e_pct = s_n / month_counts[start_period] * 100, e_n / month_counts[end_period] * 100
-        print(f"  토픽 {topic_id + 1} ({', '.join(topics_keywords[topic_id][:2])}): "
-              f"{s_n}건 {s_pct:.1f}% → {e_n}건 {e_pct:.1f}%")
-
-# 동적 토픽 변화 그래프 생성
+# 동적 토픽 변화 그래프: 분기별 실제 비중(실선)과 예측(점선)
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.rc('font', family='AppleGothic')
 plt.rcParams['axes.unicode_minus'] = False
 
 fig, ax = plt.subplots(figsize=(14, 8))
-time_topic_pct = time_topic_dist.div(month_counts, axis=0) * 100
 colors = plt.cm.tab10(range(n_topics))
-for topic_id in range(n_topics):
-    topic_label = f"토픽 {topic_id + 1}: {', '.join(topics_keywords[topic_id][:2])}"
-    ax.plot(range(len(time_topic_pct)), time_topic_pct[topic_id], marker='o', linewidth=2,
-            label=topic_label, color=colors[topic_id])
-
-ax.set_xlabel('시간 (2024.01 - 2025.12)', fontsize=12)
+labels_x = list(q_share.index) + future
+for c in range(n_topics):
+    slope, pred, verdict = trend[c]
+    ax.plot(x, q_share[c], marker='o', linewidth=2, color=colors[c],
+            label=f"토픽 {c + 1}: {', '.join(topics_keywords[c][:2])} ({verdict})")
+    ax.plot([x[-1]] + list(x_future), [q_share[c].iloc[-1]] + list(pred), linestyle='--',
+            linewidth=1.5, color=colors[c])
+ax.axvspan(x[-1] + 0.5, x_future[-1] + 0.3, color='gray', alpha=0.1)
+ax.text(x_future.mean(), ax.get_ylim()[1] * 0.95, '예측', ha='center', fontsize=11)
+ax.set_xticks(list(x) + list(x_future))
+ax.set_xticklabels(labels_x, rotation=45)
+ax.set_xlabel('분기', fontsize=12)
 ax.set_ylabel('토픽 비중 (%)', fontsize=12)
 ax.set_title('동적 토픽 변화 추이 (Topics Over Time)', fontsize=14, fontweight='bold')
-ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
+ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9)
 ax.grid(True, alpha=0.3)
-ax.set_xticks(range(0, len(time_topic_pct), 3))
-ax.set_xticklabels([time_topic_pct.index[i] for i in range(0, len(time_topic_pct), 3)], rotation=45)
 
 plt.tight_layout()
 plt.savefig('../../../diagrams/10-bertopic-topics-over-time.png', dpi=300, bbox_inches='tight')
 print("\n✓ 그래프 저장: diagrams/10-bertopic-topics-over-time.png")
 
 # 5. 토픽 간 관계 분석
-print("\n[5단계] 토픽 간 유사도 (묶음 수 10)")
+print(f"\n[5단계] 토픽 간 유사도 (묶음 수 {n_topics})")
 print("-" * 80)
 
 topic_similarity = cosine_similarity(kmeans.cluster_centers_)
@@ -349,7 +405,7 @@ print(f"가장 비슷한 쌍: 토픽 {i_max + 1} ({', '.join(topics_keywords[i_m
       f"토픽 {j_max + 1} ({', '.join(topics_keywords[j_max][:2])}): {topic_similarity[i_max, j_max]:.3f}")
 
 # 6. 문서별 토픽 할당
-print("\n[6단계] 문서별 토픽 할당 예시 (묶음 수 10)")
+print(f"\n[6단계] 문서별 토픽 할당 예시 (묶음 수 {n_topics})")
 print("-" * 80)
 
 for idx in [0, 20, len(df) - 1]:
@@ -371,7 +427,7 @@ print(comparison.to_string(index=False))
 
 # 8. 최종 요약
 print("\n" + "=" * 80)
-print("토픽 모델링 최종 결과 (묶음 수 10)")
+print(f"토픽 모델링 최종 결과 (묶음 수 {n_topics})")
 print("=" * 80)
 print(f"분석 문서 수: {len(df)}개")
 for c in range(n_topics):

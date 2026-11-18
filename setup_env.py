@@ -89,6 +89,8 @@ mods = [
     "networkx",
     "econml",
     "xgboost",
+    "sentence_transformers",
+    "kiwipiepy",
 ]
 
 failed = []

@@ -9,4 +9,6 @@ statsmodels
 networkx
 econml
 xgboost
-
+# Chapter 10 (text analysis): sentence embeddings (installs torch) and Korean morphological analysis
+sentence-transformers
+kiwipiepy
