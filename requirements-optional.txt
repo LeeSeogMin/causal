@@ -5,3 +5,4 @@ lightgbm
 quantile-forest
 linearmodels
 
+torch_geometric

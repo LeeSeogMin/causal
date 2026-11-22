@@ -67,8 +67,10 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정 (Windows: Malgun Gothic)
-matplotlib.rc('font', family='Malgun Gothic')
+# 한글 폰트 설정 (mac: AppleGothic, Windows: Malgun Gothic, 그 밖: NanumGothic)
+import platform
+KOREAN_FONT = {'Darwin': 'AppleGothic', 'Windows': 'Malgun Gothic'}.get(platform.system(), 'NanumGothic')
+plt.rcParams['font.family'] = KOREAN_FONT
 plt.rcParams['axes.unicode_minus'] = False
 
 # 출력 디렉토리

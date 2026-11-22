@@ -72,8 +72,10 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정 (Windows: Malgun Gothic)
-plt.rcParams['font.family'] = 'Malgun Gothic'
+# 한글 폰트 설정 (mac: AppleGothic, Windows: Malgun Gothic, 그 밖: NanumGothic)
+import platform
+KOREAN_FONT = {'Darwin': 'AppleGothic', 'Windows': 'Malgun Gothic'}.get(platform.system(), 'NanumGothic')
+plt.rcParams['font.family'] = KOREAN_FONT
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 10
 
@@ -284,13 +286,13 @@ def visualize_network(G, title='정부 부처 협업 네트워크'):
                           arrowstyle='->', connectionstyle='arc3,rad=0.15')
 
     nx.draw_networkx_labels(G, pos, font_size=13, font_weight='bold',
-                           font_family='Malgun Gothic')
+                           font_family=KOREAN_FONT)
 
     # 엣지 가중치 라벨 추가
     edge_labels = {(u, v): f"{G[u][v]['weight']:.1f}" for u, v in G.edges()}
     nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels,
                                   font_size=8, font_color='darkblue',
-                                  font_family='Malgun Gothic',
+                                  font_family=KOREAN_FONT,
                                   bbox=dict(boxstyle='round,pad=0.2',
                                            facecolor='white', alpha=0.7))
 

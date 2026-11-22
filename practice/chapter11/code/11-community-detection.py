@@ -68,11 +68,14 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정 (Windows: Malgun Gothic)
-plt.rcParams['font.family'] = 'Malgun Gothic'
+# 한글 폰트 설정 (mac: AppleGothic, Windows: Malgun Gothic, 그 밖: NanumGothic)
+import platform
+KOREAN_FONT = {'Darwin': 'AppleGothic', 'Windows': 'Malgun Gothic'}.get(platform.system(), 'NanumGothic')
+plt.rcParams['font.family'] = KOREAN_FONT
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 10
 
+SEED = 42
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, '..', 'data') + os.sep
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -107,8 +110,9 @@ def detect_communities_louvain(G):
     modularity : float
         모듈러리티 값
     """
-    # Greedy modularity communities (Louvain 알고리즘 기반)
-    communities_gen = community.greedy_modularity_communities(G, weight='weight')
+    # Louvain 알고리즘: 노드를 이웃 묶음으로 옮겨 Q가 오르면 옮기고, 묶음을 한 점으로 접어 반복한다
+    # 시드를 고정하지 않으면 실행할 때마다 묶음이 달라질 수 있다
+    communities_gen = community.louvain_communities(G, weight='weight', seed=SEED)
     communities_list = list(communities_gen)
 
     # 모듈러리티 계산
@@ -196,7 +200,7 @@ def visualize_communities(G, communities_list, title='정책 연합 커뮤니티
                           alpha=0.4, edge_color='gray')
 
     nx.draw_networkx_labels(G, pos, font_size=8, font_weight='bold',
-                           font_family='Malgun Gothic')
+                           font_family=KOREAN_FONT)
 
     plt.title(title, fontsize=14, fontweight='bold')
     plt.axis('off')

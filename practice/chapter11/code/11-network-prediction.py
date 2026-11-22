@@ -67,14 +67,17 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정
-plt.rcParams['font.family'] = 'Malgun Gothic'
+# 한글 폰트 설정 (mac: AppleGothic, Windows: Malgun Gothic, 그 밖: NanumGothic)
+import platform
+KOREAN_FONT = {'Darwin': 'AppleGothic', 'Windows': 'Malgun Gothic'}.get(platform.system(), 'NanumGothic')
+plt.rcParams['font.family'] = KOREAN_FONT
 plt.rcParams['axes.unicode_minus'] = False
 
 # 출력 디렉토리
 import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DIAGRAM_DIR = BASE_DIR + os.sep
+OUTPUT_DIR = os.path.join(BASE_DIR, '..', 'data') + os.sep   # 실행 위치와 무관하게 data/ 폴더를 가리킨다
 
 def generate_historical_network_data():
     """
@@ -333,9 +336,9 @@ def main():
 
     # 6. 결과 저장
     print("\n[6단계] 결과 데이터 저장...")
-    historical_df.to_csv('practice/chapter11/data/11-network-history.csv',
+    historical_df.to_csv(OUTPUT_DIR + '11-network-history.csv',
                         index=False, encoding='utf-8-sig')
-    prediction_df.to_csv('practice/chapter11/data/11-network-prediction.csv',
+    prediction_df.to_csv(OUTPUT_DIR + '11-network-prediction.csv',
                         index=False, encoding='utf-8-sig')
 
     print("\n" + "=" * 70)
@@ -344,8 +347,8 @@ def main():
 
     print("\n출력 파일:")
     print(f"  - {DIAGRAM_DIR}11-network-prediction.png")
-    print(f"  - practice/chapter11/data/11-network-history.csv")
-    print(f"  - practice/chapter11/data/11-network-prediction.csv")
+    print("  - ../data/11-network-history.csv")
+    print("  - ../data/11-network-prediction.csv")
 
 
 if __name__ == "__main__":

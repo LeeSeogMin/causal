@@ -74,8 +74,10 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# 한글 폰트 설정 (Windows: Malgun Gothic)
-plt.rcParams['font.family'] = 'Malgun Gothic'
+# 한글 폰트 설정 (mac: AppleGothic, Windows: Malgun Gothic, 그 밖: NanumGothic)
+import platform
+KOREAN_FONT = {'Darwin': 'AppleGothic', 'Windows': 'Malgun Gothic'}.get(platform.system(), 'NanumGothic')
+plt.rcParams['font.family'] = KOREAN_FONT
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 10
 
@@ -336,7 +338,7 @@ def visualize_diffusion(results, G):
     nx.draw_networkx_nodes(G, pos, node_size=1500, node_color=node_colors,
                           alpha=0.85, edgecolors='black', linewidths=1.5, ax=ax3)
     nx.draw_networkx_edges(G, pos, alpha=0.4, width=1.5, ax=ax3)
-    nx.draw_networkx_labels(G, pos, font_size=7, font_family='Malgun Gothic', ax=ax3)
+    nx.draw_networkx_labels(G, pos, font_size=7, font_family=KOREAN_FONT, ax=ax3)
 
     # 범례
     legend_elements = [

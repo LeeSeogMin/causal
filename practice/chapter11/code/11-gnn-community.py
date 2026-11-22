@@ -89,11 +89,15 @@ warnings.filterwarnings('ignore')
 
 # 재현성: 시드를 고정하지 않으면 실행할 때마다 클러스터가 달라진다
 SEED = 42
+import random
+random.seed(SEED)          # PyG의 negative_sampling은 파이썬 random 모듈로 음성 쌍을 뽑는다
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 
-# 한글 폰트 설정 (Windows: Malgun Gothic)
-plt.rcParams['font.family'] = 'Malgun Gothic'
+# 한글 폰트 설정 (mac: AppleGothic, Windows: Malgun Gothic, 그 밖: NanumGothic)
+import platform
+KOREAN_FONT = {'Darwin': 'AppleGothic', 'Windows': 'Malgun Gothic'}.get(platform.system(), 'NanumGothic')
+plt.rcParams['font.family'] = KOREAN_FONT
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 10
 
@@ -214,6 +218,9 @@ def prepare_pytorch_geometric_data(G):
         node_features.append(features)
 
     x = torch.tensor(node_features, dtype=torch.float)
+    # 표준화: 중심성 값은 0~0.47의 좁은 구간에 몰려 있어 그대로 넣으면 부처끼리 입력이 거의 같고,
+    # 손실이 50 에포크 근처에서 1.04에 멈춘다. 평균 0, 표준편차 1로 바꿔 부처 사이의 차이를 키운다
+    x = (x - x.mean(dim=0)) / x.std(dim=0)
 
     # PyTorch Geometric Data 객체 생성
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_weights)
@@ -260,6 +267,7 @@ def train_gnn_and_cluster(data, num_clusters=5, embedding_dim=16, epochs=200):
 
     # 학습: 그래프 자기부호화기(GAE)의 링크 예측 손실
     model.train()
+    recent_losses = []   # 음성 쌍을 매번 새로 뽑아 한 에포크 손실은 출렁이므로 50 에포크 평균을 출력한다
     for epoch in range(epochs):
         optimizer.zero_grad()
 
@@ -279,8 +287,12 @@ def train_gnn_and_cluster(data, num_clusters=5, embedding_dim=16, epochs=200):
         loss.backward()
         optimizer.step()
 
-        if (epoch + 1) % 50 == 0:
+        recent_losses.append(loss.item())
+        if epoch == 0:
             print(f"  Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+        if (epoch + 1) % 50 == 0:
+            print(f"  Epoch {epoch-48}-{epoch+1}/{epochs}, 평균 Loss: {np.mean(recent_losses):.4f}")
+            recent_losses = []
 
     # 최종 임베딩 추출
     model.eval()
