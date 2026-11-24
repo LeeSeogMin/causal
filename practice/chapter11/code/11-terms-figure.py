@@ -5,6 +5,7 @@
 출력
   diagrams/11-terms.png             (강의자료 lecture/ch11.md 용어 표 아래에 넣는 그림)
   diagrams/11-centrality-path.png   (11.3 표 11-3 위에 넣는 다섯 사람 중심성 그림)
+  diagrams/11-contagion-homophily.png (11.7 전염과 동종선호를 비교하는 그림)
 
 각 칸의 숫자는 이 스크립트가 networkx로 계산해 그림에 적는다.
 """
@@ -25,6 +26,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DIAGRAM_DIR = os.path.join(BASE_DIR, '..', '..', '..', 'diagrams')
 OUT_PATH = os.path.join(DIAGRAM_DIR, '11-terms.png')
 CENTRALITY_PATH = os.path.join(DIAGRAM_DIR, '11-centrality-path.png')
+CAUSAL_PATH = os.path.join(DIAGRAM_DIR, '11-contagion-homophily.png')
 
 GRAY, BLUE, RED, GREEN, ORANGE = '#BDBDBD', '#64B5F6', '#E57373', '#81C784', '#FFB74D'
 NODE_KW = dict(node_size=700, edgecolors='black', linewidths=1.2)
@@ -213,6 +215,47 @@ def figure_centrality_path():
     print(f'그림 저장: {os.path.normpath(CENTRALITY_PATH)}')
 
 
+def box(ax, xy, text, color, fontsize=13):
+    """둥근 상자 하나"""
+    ax.text(xy[0], xy[1], text, ha='center', va='center', fontsize=fontsize,
+            bbox=dict(boxstyle='round,pad=0.45', facecolor=color, edgecolor='black'))
+
+
+def arrow(ax, start, end, color='black', shrink=28):
+    ax.annotate('', xy=end, xytext=start,
+                arrowprops=dict(arrowstyle='->', color=color, lw=2.2, shrinkA=shrink, shrinkB=shrink))
+
+
+def figure_contagion_homophily():
+    """같은 관찰(연결된 A·B가 함께 채택)을 만드는 두 원인 구조"""
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.3))
+
+    ax = axes[0]
+    box(ax, (0.12, 0.62), 'A 부처\n채택(1월)', '#FFCDD2')
+    box(ax, (0.88, 0.62), 'B 부처\n채택(3월)', '#FFCDD2')
+    arrow(ax, (0.12, 0.62), (0.88, 0.62), RED, shrink=40)
+    ax.text(0.5, 0.75, '협업 관계로 전해짐', ha='center', fontsize=12, color=RED)
+    ax.text(0.5, 0.12, 'A가 채택해서 B가 채택\n원인 = 연결', ha='center', fontsize=12)
+    ax.set_title('(a) 전염', fontsize=14)
+
+    ax = axes[1]
+    box(ax, (0.5, 0.9), '원래 비슷함\n(관측 안 됨)', '#E0E0E0')
+    box(ax, (0.08, 0.38), 'A\n채택', '#FFCDD2')
+    box(ax, (0.5, 0.38), 'A–B\n협업', '#BBDEFB')
+    box(ax, (0.92, 0.38), 'B\n채택', '#FFCDD2')
+    for end in [(0.08, 0.38), (0.5, 0.38), (0.92, 0.38)]:
+        arrow(ax, (0.5, 0.9), end, 'gray', shrink=24)
+    ax.text(0.5, 0.0, 'A와 B 사이에 영향 없음\n원인 = 비슷함, 연결도 그 결과', ha='center', fontsize=12)
+    ax.set_title('(b) 동종선호', fontsize=14)
+
+    for ax in axes:
+        ax.set_xlim(-0.12, 1.12)
+        ax.set_ylim(-0.12, 1.1)
+        ax.axis('off')
+    plt.tight_layout()
+    fig.savefig(CAUSAL_PATH, dpi=150, bbox_inches='tight', facecolor='white')
+    print(f'그림 저장: {os.path.normpath(CAUSAL_PATH)}')
+
 def main():
     fig, axes = plt.subplots(2, 4, figsize=(16, 7.5))
     panels = [panel_node_edge, panel_density, panel_clustering, panel_centrality,
@@ -225,6 +268,7 @@ def main():
     fig.savefig(OUT_PATH, dpi=150, bbox_inches='tight', facecolor='white')
     print(f'그림 저장: {os.path.normpath(OUT_PATH)}')
     figure_centrality_path()
+    figure_contagion_homophily()
 
 
 if __name__ == '__main__':
