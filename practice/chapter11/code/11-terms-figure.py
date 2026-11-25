@@ -5,7 +5,8 @@
 출력
   diagrams/11-terms.png             (강의자료 lecture/ch11.md 용어 표 아래에 넣는 그림)
   diagrams/11-centrality-path.png   (11.3 표 11-3 위에 넣는 다섯 사람 중심성 그림)
-  diagrams/11-contagion-homophily.png (11.7 전염과 동종선호를 비교하는 그림)
+  diagrams/11-louvain-steps.png     (11.4 Louvain 방법의 원리)
+  diagrams/11-gnn-steps.png         (11.5 GNN이 연결과 속성을 섞는 원리)
 
 각 칸의 숫자는 이 스크립트가 networkx로 계산해 그림에 적는다.
 """
@@ -26,7 +27,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DIAGRAM_DIR = os.path.join(BASE_DIR, '..', '..', '..', 'diagrams')
 OUT_PATH = os.path.join(DIAGRAM_DIR, '11-terms.png')
 CENTRALITY_PATH = os.path.join(DIAGRAM_DIR, '11-centrality-path.png')
-CAUSAL_PATH = os.path.join(DIAGRAM_DIR, '11-contagion-homophily.png')
+LOUVAIN_PATH = os.path.join(DIAGRAM_DIR, '11-louvain-steps.png')
+GNN_PATH = os.path.join(DIAGRAM_DIR, '11-gnn-steps.png')
 
 GRAY, BLUE, RED, GREEN, ORANGE = '#BDBDBD', '#64B5F6', '#E57373', '#81C784', '#FFB74D'
 NODE_KW = dict(node_size=700, edgecolors='black', linewidths=1.2)
@@ -214,47 +216,92 @@ def figure_centrality_path():
     fig.savefig(CENTRALITY_PATH, dpi=150, bbox_inches='tight', facecolor='white')
     print(f'그림 저장: {os.path.normpath(CENTRALITY_PATH)}')
 
-
-def box(ax, xy, text, color, fontsize=13):
-    """둥근 상자 하나"""
-    ax.text(xy[0], xy[1], text, ha='center', va='center', fontsize=fontsize,
-            bbox=dict(boxstyle='round,pad=0.45', facecolor=color, edgecolor='black'))
+# 11.4·11.5 원리 그림에 쓰는 작은 그래프: 삼각형 둘을 선 하나(C-D)가 잇는다
+TOY_EDGES = [('A', 'B'), ('B', 'C'), ('A', 'C'), ('D', 'E'), ('E', 'F'), ('D', 'F'), ('C', 'D')]
+TOY_POS = {'A': (0, 1), 'B': (0, 0), 'C': (0.8, 0.5), 'D': (1.7, 0.5), 'E': (2.5, 1), 'F': (2.5, 0)}
 
 
-def arrow(ax, start, end, color='black', shrink=28):
-    ax.annotate('', xy=end, xytext=start,
-                arrowprops=dict(arrowstyle='->', color=color, lw=2.2, shrinkA=shrink, shrinkB=shrink))
+def figure_louvain_steps():
+    """Louvain: 각자 묶음 → 옮겨서 Q 올리기 → 묶음을 점으로 접기 → 더 오르지 않으면 멈춤"""
+    G = nx.Graph(TOY_EDGES)
+    Q = lambda parts: nx.community.modularity(G, parts)
+    palette = [BLUE, GREEN, ORANGE, RED, '#BA68C8', GRAY]
 
+    steps = [
+        ('(a) 시작: 모두 각자 묶음', [{n} for n in 'ABCDEF']),
+        ('(b) B를 A 묶음으로 옮김', [{'A', 'B'}, {'C'}, {'D'}, {'E'}, {'F'}]),
+        ('(c) 1단계 끝: 더 옮겨도 Q가 오르지 않음', [{'A', 'B', 'C'}, {'D', 'E', 'F'}]),
+    ]
+    fig, axes = plt.subplots(1, 4, figsize=(16, 3.8))
+    for ax, (title, parts) in zip(axes[:3], steps):
+        color = {n: palette[k] for k, part in enumerate(parts) for n in part}
+        draw(ax, G, TOY_POS, colors=[color[n] for n in G.nodes()], widths=2)
+        ax.text(1.25, -0.45, f'Q = {Q(parts):.2f}', ha='center', fontsize=13, fontweight='bold')
+        ax.set_title(title, fontsize=12)
 
-def figure_contagion_homophily():
-    """같은 관찰(연결된 A·B가 함께 채택)을 만드는 두 원인 구조"""
-    fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.3))
-
-    ax = axes[0]
-    box(ax, (0.12, 0.62), 'A 부처\n채택(1월)', '#FFCDD2')
-    box(ax, (0.88, 0.62), 'B 부처\n채택(3월)', '#FFCDD2')
-    arrow(ax, (0.12, 0.62), (0.88, 0.62), RED, shrink=40)
-    ax.text(0.5, 0.75, '협업 관계로 전해짐', ha='center', fontsize=12, color=RED)
-    ax.text(0.5, 0.12, 'A가 채택해서 B가 채택\n원인 = 연결', ha='center', fontsize=12)
-    ax.set_title('(a) 전염', fontsize=14)
-
-    ax = axes[1]
-    box(ax, (0.5, 0.9), '원래 비슷함\n(관측 안 됨)', '#E0E0E0')
-    box(ax, (0.08, 0.38), 'A\n채택', '#FFCDD2')
-    box(ax, (0.5, 0.38), 'A–B\n협업', '#BBDEFB')
-    box(ax, (0.92, 0.38), 'B\n채택', '#FFCDD2')
-    for end in [(0.08, 0.38), (0.5, 0.38), (0.92, 0.38)]:
-        arrow(ax, (0.5, 0.9), end, 'gray', shrink=24)
-    ax.text(0.5, 0.0, 'A와 B 사이에 영향 없음\n원인 = 비슷함, 연결도 그 결과', ha='center', fontsize=12)
-    ax.set_title('(b) 동종선호', fontsize=14)
+    # (d) 묶음을 점 하나로 접는다: 안쪽 선 3개는 점의 무게, 사이 선 1개는 두 점을 잇는다
+    ax = axes[3]
+    H = nx.Graph([('ABC', 'DEF')])
+    pos = {'ABC': (0.4, 0.5), 'DEF': (2.1, 0.5)}
+    nx.draw_networkx_edges(H, pos, ax=ax, width=2, edge_color='gray')
+    nx.draw_networkx_nodes(H, pos, ax=ax, node_color=[BLUE, GREEN], node_size=2200,
+                           edgecolors='black', linewidths=1.2)
+    nx.draw_networkx_labels(H, pos, ax=ax, font_family=KOREAN_FONT, font_size=11)
+    ax.text(1.25, 0.62, '사이 선 1개', ha='center', fontsize=10)
+    ax.text(1.25, -0.25, f'두 점을 더 합치면 Q = {Q([set("ABCDEF")]):.2f}로 내려감', ha='center', fontsize=11)
+    ax.text(1.25, -0.45, f'→ 멈춤, 최종 Q = {Q(steps[2][1]):.2f}', ha='center', fontsize=13, fontweight='bold')
+    ax.set_title('(d) 묶음을 점 하나로 접고 반복', fontsize=12)
 
     for ax in axes:
-        ax.set_xlim(-0.12, 1.12)
-        ax.set_ylim(-0.12, 1.1)
+        ax.set_xlim(-0.4, 2.9)
+        ax.set_ylim(-0.6, 1.3)
         ax.axis('off')
     plt.tight_layout()
-    fig.savefig(CAUSAL_PATH, dpi=150, bbox_inches='tight', facecolor='white')
-    print(f'그림 저장: {os.path.normpath(CAUSAL_PATH)}')
+    fig.savefig(LOUVAIN_PATH, dpi=150, bbox_inches='tight', facecolor='white')
+    print(f'그림 저장: {os.path.normpath(LOUVAIN_PATH)}')
+
+
+def figure_gnn_steps():
+    """GNN 원리를 평균으로 단순화: 속성(숫자)을 연결을 따라 섞으면 가까운 노드끼리 값이 닮는다"""
+    import numpy as np
+    from matplotlib import cm, colors as mcolors
+    G = nx.Graph(TOY_EDGES)
+    x = {'A': 0.9, 'B': 0.8, 'C': 0.6, 'D': 0.3, 'E': 0.1, 'F': 0.2}   # 노드 속성(예: 표준화 전 점수)
+    rounds = [x]
+    for _ in range(2):
+        prev = rounds[-1]
+        rounds.append({n: float(np.mean([prev[n]] + [prev[m] for m in G[n]])) for n in G})
+
+    norm = mcolors.Normalize(vmin=0, vmax=1)
+    cmap = cm.get_cmap('coolwarm')
+    titles = ['(a) 입력: 연결 + 속성(숫자 1칸)', '(b) 1번 모으기: 나와 이웃의 평균', '(c) 2번 모으기 → 값이 닮은 것끼리 묶음']
+    fig, axes = plt.subplots(1, 3, figsize=(14, 3.9))
+    for k, (ax, vals, title) in enumerate(zip(axes, rounds, titles)):
+        nx.draw_networkx_edges(G, TOY_POS, ax=ax, width=2, edge_color='gray')
+        nx.draw_networkx_nodes(G, TOY_POS, ax=ax, node_size=1300, edgecolors='black', linewidths=1.2,
+                               node_color=[cmap(norm(vals[n])) for n in G.nodes()])
+        nx.draw_networkx_labels(G, TOY_POS, ax=ax, font_size=10, font_family=KOREAN_FONT,
+                                labels={n: f'{n}\n{vals[n]:.2f}' for n in G})
+        ax.set_title(title, fontsize=12)
+    # (b) C가 무엇을 모으는지 화살표로 표시
+    for src in ['B', 'A', 'D']:
+        axes[1].annotate('', xy=TOY_POS['C'], xytext=TOY_POS[src],
+                         arrowprops=dict(arrowstyle='->', color=RED, lw=2, shrinkA=18, shrinkB=18,
+                                         connectionstyle='arc3,rad=0.25'))
+    axes[1].text(1.25, -0.45, 'C = (C + A + B + D) ÷ 4', ha='center', fontsize=11, color=RED)
+    axes[0].text(1.25, -0.45, '숫자 = 노드 속성, 선 = 연결', ha='center', fontsize=11)
+    for part, cx in [('ABC', 0.27), ('DEF', 2.23)]:
+        axes[2].add_patch(plt.Circle((cx, 0.5), 0.72, fill=False, ls='--', lw=1.5, color='black'))
+    axes[2].text(1.25, -0.5, '두 번 모으면 두 칸 떨어진 노드 정보까지 섞인다', ha='center', fontsize=11)
+    for ax in axes:
+        ax.set_xlim(-0.7, 3.2)
+        ax.set_ylim(-0.65, 1.45)
+        ax.set_aspect('equal')
+        ax.axis('off')
+    plt.tight_layout()
+    fig.savefig(GNN_PATH, dpi=150, bbox_inches='tight', facecolor='white')
+    print(f'그림 저장: {os.path.normpath(GNN_PATH)}')
+
 
 def main():
     fig, axes = plt.subplots(2, 4, figsize=(16, 7.5))
@@ -268,7 +315,8 @@ def main():
     fig.savefig(OUT_PATH, dpi=150, bbox_inches='tight', facecolor='white')
     print(f'그림 저장: {os.path.normpath(OUT_PATH)}')
     figure_centrality_path()
-    figure_contagion_homophily()
+    figure_louvain_steps()
+    figure_gnn_steps()
 
 
 if __name__ == '__main__':
